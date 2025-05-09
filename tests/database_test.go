@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"theary_test/repository"
+	"github.com/ammiranda/tree_service/repository"
 
 	"github.com/stretchr/testify/assert"
 )

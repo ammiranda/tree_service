@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"theary_test/models"
+	"github.com/ammiranda/tree_service/models"
 )
 
 // MockCache is a cache provider that can be used for testing

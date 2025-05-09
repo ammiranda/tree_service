@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"theary_test/models"
+	"github.com/ammiranda/tree_service/models"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"

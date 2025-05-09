@@ -1,7 +1,7 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
-WORKDIR /app
+WORKDIR /build
 
 # Install build dependencies
 RUN apk add --no-cache gcc musl-dev
@@ -22,9 +22,9 @@ ARG GOOS=linux
 ARG GOARCH=amd64
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -o /app/tree-api main.go && \
-    chmod +x /app/tree-api && \
-    ls -la /app/tree-api
+RUN CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -o tree-api main.go && \
+    chmod +x tree-api && \
+    ls -la tree-api
 
 # Final stage
 FROM alpine:latest
@@ -32,22 +32,22 @@ FROM alpine:latest
 WORKDIR /app
 
 # Install necessary runtime dependencies
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata postgresql-client
 
 # Copy the binary from builder
-COPY --from=builder /app/tree-api /app/tree-api
+COPY --from=builder /build/tree-api /app/tree-api
 
-# Copy migrations and other necessary files
-COPY --from=builder /app/migrations ./migrations
-COPY --from=builder /app/internal ./internal
-COPY --from=builder /app/handlers ./handlers
-COPY --from=builder /app/models ./models
-COPY --from=builder /app/cache ./cache
-COPY --from=builder /app/database ./database
+# Copy migrations
+COPY --from=builder /build/migrations /app/migrations
+
+# Add wait-for-it script
+COPY --from=builder /build/scripts/wait-for-it.sh /app/wait-for-it.sh
+RUN chmod +x /app/wait-for-it.sh
 
 # Verify binary exists and has proper permissions
 RUN ls -la /app/tree-api && \
-    chmod +x /app/tree-api
+    chmod +x /app/tree-api && \
+    ls -la /app/migrations
 
 # Set environment variables
 ENV TZ=UTC
@@ -55,5 +55,5 @@ ENV TZ=UTC
 # Expose port
 EXPOSE 8080
 
-# Run the application
-CMD ["/app/tree-api"] 
+# Run the application with wait-for-it script
+CMD ["/bin/sh", "-c", "/app/wait-for-it.sh postgres:5432 -- /app/tree-api"] 

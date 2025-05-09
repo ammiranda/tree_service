@@ -76,6 +76,23 @@ func (p *EnvProvider) GetEnvironment() Environment {
 func (p *EnvProvider) GetString(ctx context.Context, key string) (string, error) {
 	value := os.Getenv(p.prefix + key)
 	if value == "" {
+		// For development environment, provide default values
+		if p.environment == Development {
+			switch key {
+			case "DB_HOST":
+				return "postgres", nil
+			case "DB_PORT":
+				return "5432", nil
+			case "DB_USER":
+				return "postgres", nil
+			case "DB_PASSWORD":
+				return "postgres", nil
+			case "DB_NAME":
+				return "tree_db", nil
+			case "DB_SSLMODE":
+				return "disable", nil
+			}
+		}
 		return "", fmt.Errorf("environment variable %s%s not set", p.prefix, key)
 	}
 	return value, nil

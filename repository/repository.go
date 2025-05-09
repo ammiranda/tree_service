@@ -47,13 +47,16 @@ type Repository interface {
 	//   - Other error if the operation fails
 	GetNode(ctx context.Context, id int64) (*Node, error)
 
-	// GetAllNodes retrieves all nodes from the repository.
+	// GetAllNodes retrieves all nodes from the repository with pagination.
 	// Parameters:
 	//   - ctx: Context for the operation
+	//   - page: Page number (1-based)
+	//   - pageSize: Number of items per page
 	// Returns:
 	//   - A slice of all nodes in the repository
+	//   - Total count of nodes
 	//   - An error if the operation fails
-	GetAllNodes(ctx context.Context) ([]*Node, error)
+	GetAllNodes(ctx context.Context, page, pageSize int) ([]*Node, int64, error)
 
 	// UpdateNode updates an existing node's properties.
 	// Parameters:

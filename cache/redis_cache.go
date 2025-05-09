@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"theary_test/models"
+	"github.com/ammiranda/tree_service/models"
 
 	"github.com/redis/go-redis/v9"
 )

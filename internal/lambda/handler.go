@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
-	"theary_test/cache"
-	"theary_test/models"
-	"theary_test/repository"
+	"github.com/ammiranda/tree_service/cache"
+	"github.com/ammiranda/tree_service/models"
+	"github.com/ammiranda/tree_service/repository"
 
 	"github.com/aws/aws-lambda-go/events"
 )

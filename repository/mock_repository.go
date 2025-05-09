@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"sort"
 	"sync"
 )
 
@@ -65,17 +66,39 @@ func (m *MockRepository) GetNode(ctx context.Context, id int64) (*Node, error) {
 	return node, nil
 }
 
-// GetAllNodes retrieves all nodes
-func (m *MockRepository) GetAllNodes(ctx context.Context) ([]*Node, error) {
+// GetAllNodes retrieves all nodes with pagination
+func (m *MockRepository) GetAllNodes(ctx context.Context, page, pageSize int) ([]*Node, int64, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	nodes := make([]*Node, 0, len(m.nodes))
+	// Get total count
+	total := int64(len(m.nodes))
+
+	// Calculate offset
+	offset := int64((page - 1) * pageSize)
+
+	// Get all nodes
+	allNodes := make([]*Node, 0, len(m.nodes))
 	for _, node := range m.nodes {
-		nodes = append(nodes, node)
+		allNodes = append(allNodes, node)
 	}
 
-	return nodes, nil
+	// Sort nodes by ID
+	sort.Slice(allNodes, func(i, j int) bool {
+		return allNodes[i].ID < allNodes[j].ID
+	})
+
+	// Apply pagination
+	start := offset
+	end := offset + int64(pageSize)
+	if start >= total {
+		return []*Node{}, total, nil
+	}
+	if end > total {
+		end = total
+	}
+
+	return allNodes[start:end], total, nil
 }
 
 // UpdateNode updates a node
