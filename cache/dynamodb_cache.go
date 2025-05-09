@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ammiranda/tree_service/models"
@@ -111,12 +112,15 @@ func (c *DynamoDBCache) GetTree() ([]*models.Node, bool) {
 	now := time.Now().Unix()
 	if now > item.TTL {
 		// Cache expired, delete it
-		_, err = c.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		if _, err := c.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 			TableName: aws.String(tableName),
 			Key: map[string]types.AttributeValue{
 				"key": &types.AttributeValueMemberS{Value: cacheKey},
 			},
-		})
+		}); err != nil {
+			// Log error but continue
+			fmt.Printf("Warning: Error deleting expired cache item: %v\n", err)
+		}
 		return nil, false
 	}
 
@@ -139,7 +143,9 @@ func (c *DynamoDBCache) SetTree(tree []*models.Node) {
 	av, err := attributevalue.MarshalMap(item)
 	if err != nil {
 		// If we can't marshal the item, invalidate the cache
-		c.InvalidateCache()
+		if err := c.InvalidateCache(); err != nil {
+			fmt.Printf("Warning: Error invalidating cache after marshal failure: %v\n", err)
+		}
 		return
 	}
 
@@ -149,23 +155,23 @@ func (c *DynamoDBCache) SetTree(tree []*models.Node) {
 	})
 	if err != nil {
 		// If we can't store the item, invalidate the cache
-		c.InvalidateCache()
+		if err := c.InvalidateCache(); err != nil {
+			fmt.Printf("Warning: Error invalidating cache after put failure: %v\n", err)
+		}
 		return
 	}
 }
 
 // InvalidateCache removes the tree from DynamoDB cache
-func (c *DynamoDBCache) InvalidateCache() {
-	ctx := context.TODO()
+func (c *DynamoDBCache) InvalidateCache() error {
+	ctx := context.Background()
 	_, err := c.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(tableName),
 		Key: map[string]types.AttributeValue{
 			"key": &types.AttributeValueMemberS{Value: cacheKey},
 		},
 	})
-	if err != nil {
-		// Log error but don't fail
-	}
+	return err
 }
 
 // SetCacheTTL sets the cache time-to-live duration

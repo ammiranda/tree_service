@@ -15,7 +15,9 @@ import (
 
 func main() {
 	// Set development environment
-	os.Setenv("APP_ENV", "development")
+	if err := os.Setenv("APP_ENV", "development"); err != nil {
+		log.Fatal("Failed to set environment variable:", err)
+	}
 
 	// Create context
 	ctx := context.Background()
@@ -31,7 +33,11 @@ func main() {
 	if err := repo.Initialize(ctx); err != nil {
 		log.Fatal("Failed to initialize repository:", err)
 	}
-	defer repo.Cleanup(ctx)
+	defer func() {
+		if err := repo.Cleanup(ctx); err != nil {
+			log.Printf("Warning: Failed to cleanup repository: %v", err)
+		}
+	}()
 
 	// Initialize cache
 	if err := cache.Initialize(); err != nil {

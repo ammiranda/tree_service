@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/ammiranda/tree_service/internal/lambda"
 	"github.com/ammiranda/tree_service/repository"
 
@@ -10,7 +12,7 @@ import (
 func main() {
 	// Initialize repository
 	repo := repository.NewMockRepository()
-	if err := repo.Initialize(nil); err != nil {
+	if err := repo.Initialize(context.Background()); err != nil {
 		panic(err)
 	}
 

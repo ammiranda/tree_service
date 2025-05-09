@@ -17,7 +17,11 @@ func TestCache(t *testing.T) {
 	repo := repository.NewMockRepository()
 	err := repo.Initialize(context.Background())
 	assert.NoError(t, err)
-	defer repo.Cleanup(context.Background())
+	defer func() {
+		if err := repo.Cleanup(context.Background()); err != nil {
+			t.Errorf("Failed to cleanup repository: %v", err)
+		}
+	}()
 
 	// Create initial root node
 	id, err := repo.CreateNode(context.Background(), "root", nil)
