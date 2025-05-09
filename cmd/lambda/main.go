@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"log"
 
+	"github.com/ammiranda/tree_service/config"
 	"github.com/ammiranda/tree_service/internal/lambda"
 	"github.com/ammiranda/tree_service/repository"
 
@@ -10,10 +12,20 @@ import (
 )
 
 func main() {
+	// Initialize configuration
+	cfgProvider, err := config.NewAWSConfigProvider()
+	if err != nil {
+		log.Fatalf("Failed to create config provider: %v", err)
+	}
+
 	// Initialize repository
-	repo := repository.NewMockRepository()
+	repo, err := repository.NewPostgresRepository(cfgProvider)
+	if err != nil {
+		log.Fatalf("Failed to create repository: %v", err)
+	}
+
 	if err := repo.Initialize(context.Background()); err != nil {
-		panic(err)
+		log.Fatalf("Failed to initialize repository: %v", err)
 	}
 
 	// Create handler with repository
