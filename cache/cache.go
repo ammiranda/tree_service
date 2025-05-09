@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"theary_test/models"
+	"github.com/ammiranda/tree_service/models"
 )
 
 var (

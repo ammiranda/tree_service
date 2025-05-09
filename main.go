@@ -1,22 +1,37 @@
 package main
 
 import (
+	"context"
 	"log"
+	"os"
 
-	"theary_test/cache"
-	"theary_test/handlers"
-	"theary_test/repository"
+	"github.com/ammiranda/tree_service/cache"
+	"github.com/ammiranda/tree_service/config"
+	"github.com/ammiranda/tree_service/handlers"
+	"github.com/ammiranda/tree_service/repository"
 
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
+	// Set development environment
+	os.Setenv("APP_ENV", "development")
+
+	// Create context
+	ctx := context.Background()
+
+	// Initialize config provider
+	cfgProvider := config.NewEnvProvider("")
+
 	// Initialize repository
-	repo := repository.NewSQLiteRepository()
-	if err := repo.Initialize(nil); err != nil {
+	repo, err := repository.NewPostgresRepository(cfgProvider)
+	if err != nil {
+		log.Fatal("Failed to create repository:", err)
+	}
+	if err := repo.Initialize(ctx); err != nil {
 		log.Fatal("Failed to initialize repository:", err)
 	}
-	defer repo.Cleanup(nil)
+	defer repo.Cleanup(ctx)
 
 	// Initialize cache
 	if err := cache.Initialize(); err != nil {

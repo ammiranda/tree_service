@@ -2,198 +2,424 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"theary_test/database"
-	"theary_test/handlers"
-	"theary_test/models"
-
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ammiranda/tree_service/cache"
+	"github.com/ammiranda/tree_service/handlers"
+	"github.com/ammiranda/tree_service/models"
+	"github.com/ammiranda/tree_service/repository"
 )
 
-func setupTestRouter() *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.Default()
-	api := r.Group("/api")
-	{
-		api.GET("/tree", handlers.GetTree)
-		api.POST("/tree", handlers.CreateNode)
-	}
-	return r
-}
-
-func TestGetTreeNotFound(t *testing.T) {
-	// Setup
-	setupTestDB(t)
-	defer cleanupTestDB(t)
-
-	r := setupTestRouter()
-
-	// Test empty database
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/tree", nil)
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	var response map[string]string
-	err := json.Unmarshal(w.Body.Bytes(), &response)
+func setupTest(t *testing.T) (*repository.MockRepository, func()) {
+	// Create mock repository
+	repo := repository.NewMockRepository()
+	err := repo.Initialize(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, "tree not found", response["error"])
+
+	// Initialize cache with memory provider
+	err = cache.SetProvider(cache.NewMemoryCache())
+	assert.NoError(t, err)
+
+	// Return cleanup function
+	cleanup := func() {
+		repo.Cleanup(context.Background())
+		cache.ResetProvider()
+	}
+
+	return repo, cleanup
 }
 
 func TestGetTree(t *testing.T) {
-	// Setup
-	setupTestDB(t)
-	defer cleanupTestDB(t)
+	// Set up test environment
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	// Initialize test dependencies
+	repo, cleanup := setupTest(t)
+	defer cleanup()
 
 	// Create initial root node
-	db := database.GetDB()
-	_, err := db.Exec("INSERT INTO nodes (label, parent_id) VALUES (?, ?)", "root", nil)
+	_, err := repo.CreateNode(context.Background(), "root", nil)
 	assert.NoError(t, err)
 
-	r := setupTestRouter()
+	// Create handler
+	handler := handlers.NewTreeHandler(repo)
 
-	// Test
+	// Set up routes
+	router.GET("/tree", handler.GetTree)
+
+	// Create test request
+	req, _ := http.NewRequest("GET", "/tree", nil)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/tree", nil)
-	r.ServeHTTP(w, req)
 
-	// Assert
+	// Perform request
+	router.ServeHTTP(w, req)
+
+	// Assert response
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response []models.Node
+	var response map[string]interface{}
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-	assert.Len(t, response, 1)
-	assert.Equal(t, "root", response[0].Label)
+
+	// Check data
+	data := response["data"].([]interface{})
+	assert.Len(t, data, 1)
+	assert.Equal(t, "root", data[0].(map[string]interface{})["label"])
+
+	// Check pagination
+	pagination := response["pagination"].(map[string]interface{})
+	assert.Equal(t, float64(1), pagination["total"])
+	assert.Equal(t, float64(10), pagination["pageSize"])
+}
+
+func TestGetTreeEmpty(t *testing.T) {
+	// Set up test environment
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	// Initialize test dependencies
+	repo, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Create handler
+	handler := handlers.NewTreeHandler(repo)
+
+	// Set up routes
+	router.GET("/tree", handler.GetTree)
+
+	// Create test request
+	req, _ := http.NewRequest("GET", "/tree", nil)
+	w := httptest.NewRecorder()
+
+	// Perform request
+	router.ServeHTTP(w, req)
+
+	// Assert response
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestCreateNode(t *testing.T) {
-	// Setup
-	setupTestDB(t)
-	defer cleanupTestDB(t)
+	// Set up test environment
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	// Initialize test dependencies
+	repo, cleanup := setupTest(t)
+	defer cleanup()
 
 	// Create initial root node
-	db := database.GetDB()
-	result, err := db.Exec("INSERT INTO nodes (label, parent_id) VALUES (?, ?)", "root", nil)
-	assert.NoError(t, err)
-	rootID, err := result.LastInsertId()
+	rootID, err := repo.CreateNode(context.Background(), "root", nil)
 	assert.NoError(t, err)
 
-	r := setupTestRouter()
+	// Create handler
+	handler := handlers.NewTreeHandler(repo)
 
-	tests := []struct {
-		name       string
-		payload    models.CreateNodeRequest
-		wantStatus int
-		wantError  string
+	// Set up routes
+	router.POST("/node", handler.CreateNode)
+
+	// Create test request
+	payload := models.CreateNodeRequest{
+		Label:    "child",
+		ParentID: rootID,
+	}
+	jsonPayload, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/node", bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	// Perform request
+	router.ServeHTTP(w, req)
+
+	// Assert response
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	var response map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "child", response["label"])
+	assert.Equal(t, float64(rootID), response["parentId"])
+}
+
+func TestCreateNodeInvalidInput(t *testing.T) {
+	// Set up test environment
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	// Initialize test dependencies
+	repo, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Create handler
+	handler := handlers.NewTreeHandler(repo)
+
+	// Set up routes
+	router.POST("/tree", handler.CreateNode)
+
+	// Test cases
+	testCases := []struct {
+		name     string
+		payload  models.CreateNodeRequest
+		expected int
 	}{
 		{
-			name: "valid request",
-			payload: models.CreateNodeRequest{
-				Label:    "child",
-				ParentID: rootID,
-			},
-			wantStatus: http.StatusCreated,
+			name:     "Empty label",
+			payload:  models.CreateNodeRequest{Label: ""},
+			expected: http.StatusBadRequest,
 		},
 		{
-			name: "empty label",
-			payload: models.CreateNodeRequest{
-				Label:    "",
-				ParentID: rootID,
-			},
-			wantStatus: http.StatusBadRequest,
+			name:     "Label too long",
+			payload:  models.CreateNodeRequest{Label: string(make([]byte, 101))},
+			expected: http.StatusBadRequest,
 		},
 		{
-			name: "non-existent parent",
-			payload: models.CreateNodeRequest{
-				Label:    "child",
-				ParentID: 999,
-			},
-			wantStatus: http.StatusNotFound,
-			wantError:  "parent node not found",
-		},
-		{
-			name: "label too long",
-			payload: models.CreateNodeRequest{
-				Label:    string(make([]byte, 101)),
-				ParentID: rootID,
-			},
-			wantStatus: http.StatusBadRequest,
+			name:     "Invalid parent ID",
+			payload:  models.CreateNodeRequest{Label: "test", ParentID: -1},
+			expected: http.StatusBadRequest,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			payload, _ := json.Marshal(tt.payload)
-			w := httptest.NewRecorder()
-			req, _ := http.NewRequest("POST", "/api/tree", bytes.NewBuffer(payload))
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			jsonPayload, _ := json.Marshal(tc.payload)
+			req, _ := http.NewRequest("POST", "/tree", bytes.NewBuffer(jsonPayload))
 			req.Header.Set("Content-Type", "application/json")
-			r.ServeHTTP(w, req)
+			w := httptest.NewRecorder()
 
-			assert.Equal(t, tt.wantStatus, w.Code)
-
-			if tt.wantError != "" {
-				var response map[string]string
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				assert.NoError(t, err)
-				assert.Equal(t, tt.wantError, response["error"])
-			}
-
-			if tt.wantStatus == http.StatusCreated {
-				var response map[string]interface{}
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				assert.NoError(t, err)
-				assert.Equal(t, tt.payload.Label, response["label"])
-				assert.Equal(t, float64(tt.payload.ParentID), response["parentId"])
-			}
+			router.ServeHTTP(w, req)
+			assert.Equal(t, tc.expected, w.Code)
 		})
 	}
 }
 
-func TestTreeStructure(t *testing.T) {
-	// Setup
-	setupTestDB(t)
-	defer cleanupTestDB(t)
+func TestCreateNodeNonExistentParent(t *testing.T) {
+	// Set up test environment
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	// Initialize test dependencies
+	repo, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Create handler
+	handler := handlers.NewTreeHandler(repo)
+
+	// Set up routes
+	router.POST("/tree", handler.CreateNode)
+
+	// Create test request with non-existent parent
+	payload := models.CreateNodeRequest{
+		Label:    "child",
+		ParentID: 999, // Non-existent parent ID
+	}
+	jsonPayload, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/tree", bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	// Perform request
+	router.ServeHTTP(w, req)
+
+	// Assert response
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestCreateNodeDeepNesting(t *testing.T) {
+	// Set up test environment
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	// Initialize test dependencies
+	repo, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Create handler
+	handler := handlers.NewTreeHandler(repo)
+
+	// Set up routes
+	router.POST("/tree", handler.CreateNode)
+
+	// Create root node
+	rootID, err := repo.CreateNode(context.Background(), "root", nil)
+	assert.NoError(t, err)
+
+	// Create a chain of nodes
+	var lastID int64 = rootID
+	for i := 0; i < 10; i++ {
+		payload := models.CreateNodeRequest{
+			Label:    fmt.Sprintf("level_%d", i+1),
+			ParentID: lastID,
+		}
+		jsonPayload, _ := json.Marshal(payload)
+		req, _ := http.NewRequest("POST", "/tree", bytes.NewBuffer(jsonPayload))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusCreated, w.Code)
+
+		var response map[string]interface{}
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		lastID = int64(response["id"].(float64))
+	}
+
+	// Verify the tree structure
+	nodes, total, err := repo.GetAllNodes(context.Background(), 1, 20)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(11), total) // Root + 10 levels
+	assert.Len(t, nodes, 11)
+}
+
+func TestUpdateNode(t *testing.T) {
+	// Set up test environment
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	// Initialize test dependencies
+	repo, cleanup := setupTest(t)
+	defer cleanup()
 
 	// Create initial root node
-	db := database.GetDB()
-	result, err := db.Exec("INSERT INTO nodes (label, parent_id) VALUES (?, ?)", "root", nil)
-	assert.NoError(t, err)
-	rootID, err := result.LastInsertId()
+	nodeID, err := repo.CreateNode(context.Background(), "root", nil)
 	assert.NoError(t, err)
 
-	// Create child node
-	result, err = db.Exec("INSERT INTO nodes (label, parent_id) VALUES (?, ?)", "child", rootID)
-	assert.NoError(t, err)
-	childID, err := result.LastInsertId()
-	assert.NoError(t, err)
+	// Create handler
+	handler := handlers.NewTreeHandler(repo)
 
-	// Create grandchild node
-	_, err = db.Exec("INSERT INTO nodes (label, parent_id) VALUES (?, ?)", "grandchild", childID)
-	assert.NoError(t, err)
+	// Set up routes
+	router.PUT("/node/:id", handler.UpdateNode)
 
-	r := setupTestRouter()
+	// Create test request payload
+	payload := models.UpdateNodeRequest{
+		Label: "updated_root",
+	}
+	jsonPayload, _ := json.Marshal(payload)
 
-	// Test
+	// Create test request
+	req, _ := http.NewRequest("PUT", fmt.Sprintf("/node/%d", nodeID), bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/tree", nil)
-	r.ServeHTTP(w, req)
 
-	// Assert
+	// Perform request
+	router.ServeHTTP(w, req)
+
+	// Assert response
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response []models.Node
-	err = json.Unmarshal(w.Body.Bytes(), &response)
+	// Verify the update
+	updatedNode, err := repo.GetNode(context.Background(), nodeID)
 	assert.NoError(t, err)
-	assert.Len(t, response, 1)
-	assert.Equal(t, "root", response[0].Label)
-	assert.Len(t, response[0].Children, 1)
-	assert.Equal(t, "child", response[0].Children[0].Label)
-	assert.Len(t, response[0].Children[0].Children, 1)
-	assert.Equal(t, "grandchild", response[0].Children[0].Children[0].Label)
+	assert.Equal(t, "updated_root", updatedNode.Label)
+}
+
+func TestGetTreePagination(t *testing.T) {
+	// Set up test environment
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	// Initialize test dependencies
+	repo, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Create multiple root nodes
+	for i := 0; i < 15; i++ {
+		_, err := repo.CreateNode(context.Background(), fmt.Sprintf("root_%d", i+1), nil)
+		assert.NoError(t, err)
+	}
+
+	// Create handler
+	handler := handlers.NewTreeHandler(repo)
+
+	// Set up routes
+	router.GET("/tree", handler.GetTree)
+
+	// Test cases
+	testCases := []struct {
+		name           string
+		query          string
+		expectedCount  int
+		expectedTotal  int64
+		expectedStatus int
+	}{
+		{
+			name:           "Default pagination",
+			query:          "",
+			expectedCount:  10,
+			expectedTotal:  15,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Custom page size",
+			query:          "?pageSize=5",
+			expectedCount:  5,
+			expectedTotal:  15,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Second page",
+			query:          "?page=2&pageSize=5",
+			expectedCount:  5,
+			expectedTotal:  15,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Last page",
+			query:          "?page=3&pageSize=5",
+			expectedCount:  5,
+			expectedTotal:  15,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Invalid page",
+			query:          "?page=0",
+			expectedCount:  10,
+			expectedTotal:  15,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Invalid page size",
+			query:          "?pageSize=200",
+			expectedCount:  10,
+			expectedTotal:  15,
+			expectedStatus: http.StatusOK,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create test request
+			req, _ := http.NewRequest("GET", "/tree"+tc.query, nil)
+			w := httptest.NewRecorder()
+
+			// Perform request
+			router.ServeHTTP(w, req)
+
+			// Assert response
+			assert.Equal(t, tc.expectedStatus, w.Code)
+
+			if tc.expectedStatus == http.StatusOK {
+				var response map[string]interface{}
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				assert.NoError(t, err)
+
+				// Check data
+				data := response["data"].([]interface{})
+				assert.Len(t, data, tc.expectedCount)
+
+				// Check pagination
+				pagination := response["pagination"].(map[string]interface{})
+				assert.Equal(t, float64(tc.expectedTotal), pagination["total"])
+				assert.Equal(t, float64(tc.expectedCount), pagination["pageSize"])
+			}
+		})
+	}
 }

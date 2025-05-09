@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"theary_test/config"
+	"github.com/ammiranda/tree_service/config"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -35,16 +35,18 @@ func NewPostgresRepository(cfgProvider config.Provider) (*PostgresRepository, er
 
 // Initialize sets up the PostgreSQL database
 func (r *PostgresRepository) Initialize(ctx context.Context) error {
-	// Construct connection string
+	// Construct connection string using standard format
 	connStr := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		r.config.Host,
-		r.config.Port,
+		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
 		r.config.User,
 		r.config.Password,
+		r.config.Host,
+		r.config.Port,
 		r.config.DBName,
 		r.config.SSLMode,
 	)
+
+	fmt.Printf("Attempting to connect to database at %s:%d\n", r.config.Host, r.config.Port)
 
 	// Open database connection
 	db, err := sql.Open("postgres", connStr)
@@ -57,17 +59,23 @@ func (r *PostgresRepository) Initialize(ctx context.Context) error {
 	db.SetMaxIdleConns(25)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
+	fmt.Println("Testing database connection...")
+
 	// Test the connection
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return fmt.Errorf("error pinging database: %w", err)
 	}
 
+	fmt.Println("Database connection successful, running migrations...")
+
 	// Run migrations
 	if err := r.runMigrations(db); err != nil {
 		db.Close()
 		return fmt.Errorf("error running migrations: %w", err)
 	}
+
+	fmt.Println("Migrations completed successfully")
 
 	r.db = db
 	return nil
@@ -81,7 +89,7 @@ func (r *PostgresRepository) runMigrations(db *sql.DB) error {
 	}
 
 	m, err := migrate.NewWithDatabaseInstance(
-		"file://migrations",
+		"file:///app/migrations",
 		"postgres",
 		driver,
 	)
@@ -152,11 +160,25 @@ func (r *PostgresRepository) GetNode(ctx context.Context, id int64) (*Node, erro
 	return &node, nil
 }
 
-// GetAllNodes retrieves all nodes from the database
-func (r *PostgresRepository) GetAllNodes(ctx context.Context) ([]*Node, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT id, label, parent_id FROM nodes ORDER BY id")
+// GetAllNodes retrieves all nodes from the database with pagination
+func (r *PostgresRepository) GetAllNodes(ctx context.Context, page, pageSize int) ([]*Node, int64, error) {
+	// Get total count
+	var total int64
+	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM nodes").Scan(&total)
 	if err != nil {
-		return nil, fmt.Errorf("error getting all nodes: %w", err)
+		return nil, 0, fmt.Errorf("error getting total count: %w", err)
+	}
+
+	// Calculate offset
+	offset := (page - 1) * pageSize
+
+	// Get paginated nodes
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT id, label, parent_id FROM nodes ORDER BY id LIMIT $1 OFFSET $2",
+		pageSize, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error getting nodes: %w", err)
 	}
 	defer rows.Close()
 
@@ -165,7 +187,7 @@ func (r *PostgresRepository) GetAllNodes(ctx context.Context) ([]*Node, error) {
 		var node Node
 		var parentID sql.NullInt64
 		if err := rows.Scan(&node.ID, &node.Label, &parentID); err != nil {
-			return nil, fmt.Errorf("error scanning node: %w", err)
+			return nil, 0, fmt.Errorf("error scanning node: %w", err)
 		}
 		if parentID.Valid {
 			node.ParentID = &parentID.Int64
@@ -173,9 +195,10 @@ func (r *PostgresRepository) GetAllNodes(ctx context.Context) ([]*Node, error) {
 		nodes = append(nodes, &node)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating nodes: %w", err)
+		return nil, 0, fmt.Errorf("error iterating nodes: %w", err)
 	}
-	return nodes, nil
+
+	return nodes, total, nil
 }
 
 // UpdateNode updates a node's properties

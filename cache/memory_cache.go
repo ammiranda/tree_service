@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"theary_test/models"
+	"github.com/ammiranda/tree_service/models"
 )
 
 // MemoryCache implements CacheProvider using in-memory storage
