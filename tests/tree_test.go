@@ -425,3 +425,180 @@ func TestGetTreePagination(t *testing.T) {
 		})
 	}
 }
+
+func TestMultipleTrees(t *testing.T) {
+	// Set up test environment
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+
+	// Initialize test dependencies
+	repo, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Create handler
+	handler := handlers.NewTreeHandler(repo)
+
+	// Set up routes
+	router.POST("/tree", handler.CreateNode)
+	router.GET("/tree", handler.GetTree)
+	router.PUT("/tree/:id", handler.UpdateNode)
+
+	// Create three independent trees
+	treeStructures := []struct {
+		rootLabel string
+		children  []string
+	}{
+		{
+			rootLabel: "Tree1",
+			children:  []string{"Child1.1", "Child1.2", "Child1.3"},
+		},
+		{
+			rootLabel: "Tree2",
+			children:  []string{"Child2.1", "Child2.2"},
+		},
+		{
+			rootLabel: "Tree3",
+			children:  []string{"Child3.1", "Child3.2", "Child3.3", "Child3.4"},
+		},
+	}
+
+	rootIDs := make([]int64, len(treeStructures))
+
+	// Create root nodes
+	for i, tree := range treeStructures {
+		// Create root node
+		rootID, err := repo.CreateNode(context.Background(), tree.rootLabel, nil)
+		assert.NoError(t, err)
+		rootIDs[i] = rootID
+
+		// Create children for this tree
+		for _, childLabel := range tree.children {
+			payload := models.CreateNodeRequest{
+				Label:    childLabel,
+				ParentID: rootID,
+			}
+			jsonPayload, _ := json.Marshal(payload)
+			req, _ := http.NewRequest("POST", "/tree", bytes.NewBuffer(jsonPayload))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusCreated, w.Code)
+		}
+	}
+
+	// Test getting all trees
+	req, _ := http.NewRequest("GET", "/tree", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	// Check data
+	data := response["data"].([]interface{})
+	assert.Len(t, data, 3) // Should have 3 root nodes
+
+	// Verify each tree's structure
+	for i, rootNode := range data {
+		nodeMap := rootNode.(map[string]interface{})
+		assert.Equal(t, treeStructures[i].rootLabel, nodeMap["label"])
+
+		// Get children count
+		children := nodeMap["children"].([]interface{})
+		assert.Len(t, children, len(treeStructures[i].children))
+	}
+
+	// Test pagination with multiple trees
+	testCases := []struct {
+		name           string
+		query          string
+		expectedCount  int
+		expectedTotal  int64
+		expectedStatus int
+	}{
+		{
+			name:           "First page with 2 items",
+			query:          "?pageSize=2",
+			expectedCount:  2,
+			expectedTotal:  3,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Second page with 2 items",
+			query:          "?page=2&pageSize=2",
+			expectedCount:  1,
+			expectedTotal:  3,
+			expectedStatus: http.StatusOK,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", "/tree"+tc.query, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tc.expectedStatus, w.Code)
+
+			var response map[string]interface{}
+			err := json.Unmarshal(w.Body.Bytes(), &response)
+			assert.NoError(t, err)
+
+			data := response["data"].([]interface{})
+			assert.Len(t, data, tc.expectedCount)
+
+			pagination := response["pagination"].(map[string]interface{})
+			assert.Equal(t, float64(tc.expectedTotal), pagination["total"])
+		})
+	}
+
+	// Test updating nodes in different trees
+	for i, rootID := range rootIDs {
+		// Update root node
+		updatePayload := models.UpdateNodeRequest{
+			Label: fmt.Sprintf("Updated%s", treeStructures[i].rootLabel),
+		}
+		jsonPayload, _ := json.Marshal(updatePayload)
+		req, _ := http.NewRequest("PUT", fmt.Sprintf("/tree/%d", rootID), bytes.NewBuffer(jsonPayload))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Verify update
+		updatedNode, err := repo.GetNode(context.Background(), rootID)
+		assert.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("Updated%s", treeStructures[i].rootLabel), updatedNode.Label)
+	}
+
+	// Test deleting one tree
+	err = repo.DeleteNode(context.Background(), rootIDs[0])
+	assert.NoError(t, err)
+
+	// Verify remaining trees
+	nodes, total, err := repo.GetAllNodes(context.Background(), 1, 10)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(8), total) // 2 root nodes + 6 children (2 from Tree2 + 4 from Tree3)
+	assert.Len(t, nodes, 8)          // Verify we have all remaining nodes
+
+	// Verify Tree1 and its children are deleted
+	for _, node := range nodes {
+		assert.NotEqual(t, "Tree1", node.Label)
+		assert.NotEqual(t, "Child1.1", node.Label)
+		assert.NotEqual(t, "Child1.2", node.Label)
+		assert.NotEqual(t, "Child1.3", node.Label)
+	}
+
+	// Verify remaining trees are intact
+	remainingTrees := 0
+	for _, node := range nodes {
+		if node.ParentID == nil {
+			remainingTrees++
+		}
+	}
+	assert.Equal(t, 2, remainingTrees) // Should have 2 root nodes (Tree2 and Tree3)
+}

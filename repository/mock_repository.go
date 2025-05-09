@@ -117,16 +117,34 @@ func (m *MockRepository) UpdateNode(ctx context.Context, id int64, label string,
 	return nil
 }
 
-// DeleteNode deletes a node
+// DeleteNode deletes a node and its children
 func (m *MockRepository) DeleteNode(ctx context.Context, id int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := m.nodes[id]; !ok {
-		return ErrNodeNotFound
-	}
+	// First, find and delete all child nodes
+	toDelete := []int64{id}
+	deleted := make(map[int64]bool)
 
-	delete(m.nodes, id)
+	for len(toDelete) > 0 {
+		currentID := toDelete[0]
+		toDelete = toDelete[1:]
+
+		if deleted[currentID] {
+			continue
+		}
+
+		// Find all children of the current node
+		for nodeID, node := range m.nodes {
+			if node.ParentID != nil && *node.ParentID == currentID {
+				toDelete = append(toDelete, nodeID)
+			}
+		}
+
+		// Delete the current node
+		delete(m.nodes, currentID)
+		deleted[currentID] = true
+	}
 
 	return nil
 }
