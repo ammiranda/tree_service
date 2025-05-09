@@ -31,13 +31,27 @@ type DynamoDBCache struct {
 
 // NewDynamoDBCache creates a new DynamoDB cache provider
 func NewDynamoDBCache() (*DynamoDBCache, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO())
+	// Try to load AWS configuration with explicit error handling
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion("us-east-1"), // Default region, can be overridden by environment
+		config.WithRetryMode(aws.RetryModeStandard),
+		config.WithRetryMaxAttempts(3),
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to load AWS configuration: %w. Please ensure AWS credentials are properly configured in environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) or ~/.aws/credentials", err)
+	}
+
+	// Create DynamoDB client
+	client := dynamodb.NewFromConfig(cfg)
+
+	// Test the connection with a simple operation
+	_, err = client.ListTables(context.TODO(), &dynamodb.ListTablesInput{Limit: aws.Int32(1)})
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to DynamoDB: %w. Please check your AWS credentials and permissions", err)
 	}
 
 	return &DynamoDBCache{
-		client:   dynamodb.NewFromConfig(cfg),
+		client:   client,
 		cacheTTL: 5 * time.Minute,
 	}, nil
 }
