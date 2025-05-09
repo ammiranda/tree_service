@@ -63,7 +63,9 @@ func (r *PostgresRepository) Initialize(ctx context.Context) error {
 
 	// Test the connection
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			fmt.Printf("Warning: Error closing database connection: %v\n", closeErr)
+		}
 		return fmt.Errorf("error pinging database: %w", err)
 	}
 
@@ -71,7 +73,9 @@ func (r *PostgresRepository) Initialize(ctx context.Context) error {
 
 	// Run migrations
 	if err := r.runMigrations(db); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			fmt.Printf("Warning: Error closing database connection: %v\n", closeErr)
+		}
 		return fmt.Errorf("error running migrations: %w", err)
 	}
 
@@ -180,7 +184,11 @@ func (r *PostgresRepository) GetAllNodes(ctx context.Context, page, pageSize int
 	if err != nil {
 		return nil, 0, fmt.Errorf("error getting nodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			fmt.Printf("Warning: Error closing rows: %v\n", err)
+		}
+	}()
 
 	var nodes []*Node
 	for rows.Next() {
@@ -251,7 +259,12 @@ func (r *PostgresRepository) DeleteNode(ctx context.Context, id int64) error {
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil {
+			// Log the error but don't return it since we're in a defer
+			fmt.Printf("Error rolling back transaction: %v\n", err)
+		}
+	}()
 
 	// Delete all child nodes recursively using a CTE
 	_, err = tx.ExecContext(ctx, `

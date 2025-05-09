@@ -30,7 +30,9 @@ func setupTest(t *testing.T) (*repository.MockRepository, func()) {
 
 	// Return cleanup function
 	cleanup := func() {
-		repo.Cleanup(context.Background())
+		if err := repo.Cleanup(context.Background()); err != nil {
+			t.Errorf("Failed to cleanup repository: %v", err)
+		}
 		cache.ResetProvider()
 	}
 
@@ -252,7 +254,7 @@ func TestCreateNodeDeepNesting(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create a chain of nodes
-	var lastID int64 = rootID
+	lastID := rootID
 	for i := 0; i < 10; i++ {
 		payload := models.CreateNodeRequest{
 			Label:    fmt.Sprintf("level_%d", i+1),
@@ -412,13 +414,11 @@ func TestGetTreePagination(t *testing.T) {
 				assert.NoError(t, err)
 
 				// Check data
-				data, ok := response["data"].([]interface{})
-				assert.True(t, ok, "data should be an array")
+				data := response["data"].([]interface{})
 				assert.Len(t, data, tc.expectedCount)
 
 				// Check pagination
-				pagination, ok := response["pagination"].(map[string]interface{})
-				assert.True(t, ok, "pagination should be an object")
+				pagination := response["pagination"].(map[string]interface{})
 				assert.Equal(t, float64(tc.expectedTotal), pagination["total"])
 				assert.Equal(t, float64(tc.expectedCount), pagination["pageSize"])
 			}

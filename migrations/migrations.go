@@ -74,7 +74,11 @@ func RunMigrations(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("error querying applied migrations: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			fmt.Printf("Warning: Error closing rows: %v\n", err)
+		}
+	}()
 
 	applied := make(map[int]bool)
 	for rows.Next() {
@@ -93,7 +97,11 @@ func RunMigrations(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil {
+			fmt.Printf("Warning: Error rolling back transaction: %v\n", err)
+		}
+	}()
 
 	// Apply pending migrations
 	for _, migration := range Migrations {
@@ -145,7 +153,11 @@ func RollbackMigration(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("error beginning transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil {
+			fmt.Printf("Warning: Error rolling back transaction: %v\n", err)
+		}
+	}()
 
 	// Execute rollback
 	if _, err := tx.ExecContext(ctx, migration.Down); err != nil {
