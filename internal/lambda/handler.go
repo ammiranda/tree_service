@@ -64,7 +64,8 @@ func (h *Handler) handleGetTree(ctx context.Context, request events.APIGatewayPr
 	}
 
 	// If not in cache, build from repository
-	nodes, err := h.repo.GetAllNodes(ctx)
+	// Default to first page with 100 items to get all nodes
+	nodes, total, err := h.repo.GetAllNodes(ctx, 1, 100)
 	if err != nil {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
@@ -94,7 +95,20 @@ func (h *Handler) handleGetTree(ctx context.Context, request events.APIGatewayPr
 	// Store in cache
 	cache.SetTree(rootNodes)
 
-	body, err := json.Marshal(rootNodes)
+	// Create response with pagination info
+	response := map[string]interface{}{
+		"data": rootNodes,
+		"pagination": map[string]interface{}{
+			"page":       1,
+			"pageSize":   100,
+			"total":      total,
+			"totalPages": (total + 99) / 100, // Ceiling division
+			"hasNext":    false,
+			"hasPrev":    false,
+		},
+	}
+
+	body, err := json.Marshal(response)
 	if err != nil {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
