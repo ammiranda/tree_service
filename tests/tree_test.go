@@ -412,11 +412,13 @@ func TestGetTreePagination(t *testing.T) {
 				assert.NoError(t, err)
 
 				// Check data
-				data := response["data"].([]interface{})
+				data, ok := response["data"].([]interface{})
+				assert.True(t, ok, "data should be an array")
 				assert.Len(t, data, tc.expectedCount)
 
 				// Check pagination
-				pagination := response["pagination"].(map[string]interface{})
+				pagination, ok := response["pagination"].(map[string]interface{})
+				assert.True(t, ok, "pagination should be an object")
 				assert.Equal(t, float64(tc.expectedTotal), pagination["total"])
 				assert.Equal(t, float64(tc.expectedCount), pagination["pageSize"])
 			}

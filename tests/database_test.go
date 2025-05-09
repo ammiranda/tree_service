@@ -28,8 +28,9 @@ func TestMockRepository(t *testing.T) {
 	assert.Nil(t, node.ParentID)
 
 	// Test getting all nodes
-	nodes, err := repo.GetAllNodes(context.Background())
+	nodes, total, err := repo.GetAllNodes(context.Background(), 1, 10)
 	assert.NoError(t, err)
+	assert.Equal(t, int64(1), total)
 	assert.Len(t, nodes, 1)
 	assert.Equal(t, id, nodes[0].ID)
 	assert.Equal(t, "test", nodes[0].Label)

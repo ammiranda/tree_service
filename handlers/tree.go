@@ -95,20 +95,48 @@ func (h *TreeHandler) GetTree(c *gin.Context) {
 			c.JSON(http.StatusNotFound, map[string]string{"error": "tree not found"})
 			return
 		}
-		c.JSON(http.StatusOK, cachedTree)
+
+		// Apply pagination to cached data
+		total := int64(len(cachedTree))
+		start := (page - 1) * pageSize
+		end := start + pageSize
+		if start >= len(cachedTree) {
+			start = len(cachedTree)
+		}
+		if end > len(cachedTree) {
+			end = len(cachedTree)
+		}
+
+		// Calculate pagination metadata
+		totalPages := (total + int64(pageSize) - 1) / int64(pageSize)
+		hasNext := int64(page) < totalPages
+		hasPrev := page > 1
+
+		// Return paginated response
+		c.JSON(http.StatusOK, gin.H{
+			"data": cachedTree[start:end],
+			"pagination": gin.H{
+				"page":       page,
+				"pageSize":   pageSize,
+				"total":      total,
+				"totalPages": totalPages,
+				"hasNext":    hasNext,
+				"hasPrev":    hasPrev,
+			},
+		})
 		return
 	}
 
-	// If not in cache, get from repository
+	// If not in cache, get all nodes from repository
 	ctx := c.Request.Context()
-	nodes, total, err := h.repo.GetAllNodes(ctx, page, pageSize)
+	allNodes, total, err := h.repo.GetAllNodes(ctx, 1, 1000) // Get all nodes
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
 	// Build tree structure
-	rootNodes, err := BuildTreeFromNodes(nodes)
+	rootNodes, err := BuildTreeFromNodes(allNodes)
 	if err != nil {
 		if errors.Is(err, ErrTreeNotFound) {
 			c.JSON(http.StatusNotFound, map[string]string{"error": "tree not found"})
@@ -118,8 +146,18 @@ func (h *TreeHandler) GetTree(c *gin.Context) {
 		return
 	}
 
-	// Store in cache
+	// Store complete tree in cache
 	cache.SetTree(rootNodes)
+
+	// Apply pagination
+	start := (page - 1) * pageSize
+	end := start + pageSize
+	if start >= len(rootNodes) {
+		start = len(rootNodes)
+	}
+	if end > len(rootNodes) {
+		end = len(rootNodes)
+	}
 
 	// Calculate pagination metadata
 	totalPages := (total + int64(pageSize) - 1) / int64(pageSize)
@@ -128,7 +166,7 @@ func (h *TreeHandler) GetTree(c *gin.Context) {
 
 	// Return paginated response
 	c.JSON(http.StatusOK, gin.H{
-		"data": rootNodes,
+		"data": rootNodes[start:end],
 		"pagination": gin.H{
 			"page":       page,
 			"pageSize":   pageSize,
