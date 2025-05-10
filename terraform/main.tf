@@ -13,7 +13,7 @@ provider "aws" {
 
 # VPC and Network Configuration
 module "vpc" {
-  source  = "git::https://github.com/terraform-aws-modules/terraform-aws-vpc.git?ref=v5.0.0"
+  source = "git::https://github.com/terraform-aws-modules/terraform-aws-vpc.git?ref=v5.0.0"
 
   name = "tree-service-vpc"
   cidr = "10.0.0.0/16"
@@ -22,8 +22,20 @@ module "vpc" {
   private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
   public_subnets  = ["10.0.101.0/24", "10.0.102.0/24"]
 
+  # Enable only what's needed for serverless
   enable_nat_gateway = true
   single_nat_gateway = true
+  enable_vpn_gateway = false
+
+  # Disable unnecessary features
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  # Tags for better resource management
+  tags = {
+    Environment = var.environment
+    Service     = "tree-service"
+  }
 }
 
 # RDS Instance
@@ -217,34 +229,24 @@ resource "aws_iam_role_policy" "lambda" {
       {
         Effect = "Allow"
         Action = [
+          # VPC and Networking
           "ec2:CreateNetworkInterface",
           "ec2:DescribeNetworkInterfaces",
-          "ec2:DeleteNetworkInterface"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
+          "ec2:DeleteNetworkInterface",
+          # CloudWatch Logs
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:*:*:*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
+          "logs:PutLogEvents",
+          # ECR Access
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage",
-          "ecr:BatchCheckLayerAvailability"
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetAuthorizationToken"
         ]
-        Resource = aws_ecr_repository.app.arn
-      },
-      {
-        Effect = "Allow"
-        Action = "ecr:GetAuthorizationToken"
-        Resource = "*"
+        Resource = [
+          "*",
+          aws_ecr_repository.app.arn
+        ]
       }
     ]
   })

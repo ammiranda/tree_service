@@ -1,5 +1,6 @@
-aws_region = "us-west-2"
-project_name = "tree-api"
-db_password = "your-secure-password"  # Replace with a secure password
-db_username = "postgres"
+aws_region = "us-east-1"
+project_name = "tree-service"
+environment = "dev"
+db_username = "admin"
+db_password = "your-secure-password"
 db_name = "tree_db" 
