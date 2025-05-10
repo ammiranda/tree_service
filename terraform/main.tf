@@ -13,7 +13,7 @@ provider "aws" {
 
 # VPC and Network Configuration
 module "vpc" {
-  source = "terraform-aws-modules/vpc/aws/modules/vpc"
+  source = "terraform-aws-modules/vpc/aws"
 
   name = "tree-service-vpc"
   cidr = "10.0.0.0/16"
