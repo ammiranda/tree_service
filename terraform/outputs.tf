@@ -25,12 +25,12 @@ output "vpc_id" {
 
 output "private_subnet_ids" {
   description = "IDs of the private subnets"
-  value       = module.vpc.private_subnets[*].id
+  value       = module.vpc.private_subnets
 }
 
 output "public_subnet_ids" {
   description = "IDs of the public subnets"
-  value       = module.vpc.public_subnets[*].id
+  value       = module.vpc.public_subnets
 }
 
 output "rds_security_group_id" {
