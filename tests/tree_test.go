@@ -547,19 +547,70 @@ func TestMultipleTrees(t *testing.T) {
 	// Create three independent trees
 	treeStructures := []struct {
 		rootLabel string
-		children  []string
+		children  []struct {
+			label    string
+			children []string
+		}
 	}{
 		{
 			rootLabel: "Tree1",
-			children:  []string{"Child1.1", "Child1.2", "Child1.3"},
+			children: []struct {
+				label    string
+				children []string
+			}{
+				{
+					label:    "Child1.1",
+					children: []string{"Grandchild1.1.1", "Grandchild1.1.2"},
+				},
+				{
+					label:    "Child1.2",
+					children: []string{"Grandchild1.2.1"},
+				},
+				{
+					label:    "Child1.3",
+					children: []string{},
+				},
+			},
 		},
 		{
 			rootLabel: "Tree2",
-			children:  []string{"Child2.1", "Child2.2"},
+			children: []struct {
+				label    string
+				children []string
+			}{
+				{
+					label:    "Child2.1",
+					children: []string{},
+				},
+				{
+					label:    "Child2.2",
+					children: []string{},
+				},
+			},
 		},
 		{
 			rootLabel: "Tree3",
-			children:  []string{"Child3.1", "Child3.2", "Child3.3", "Child3.4"},
+			children: []struct {
+				label    string
+				children []string
+			}{
+				{
+					label:    "Child3.1",
+					children: []string{},
+				},
+				{
+					label:    "Child3.2",
+					children: []string{},
+				},
+				{
+					label:    "Child3.3",
+					children: []string{},
+				},
+				{
+					label:    "Child3.4",
+					children: []string{},
+				},
+			},
 		},
 	}
 
@@ -584,17 +635,37 @@ func TestMultipleTrees(t *testing.T) {
 		rootIDs[i] = int64(response["id"].(float64))
 
 		// Create children for this tree
-		for _, childLabel := range tree.children {
-			payload := models.CreateNodeRequest{
-				Label:    childLabel,
+		for _, child := range tree.children {
+			// Create child node
+			childPayload := models.CreateNodeRequest{
+				Label:    child.label,
 				ParentID: rootIDs[i],
 			}
-			jsonPayload, _ := json.Marshal(payload)
+			jsonPayload, _ := json.Marshal(childPayload)
 			req, _ := http.NewRequest("POST", "/tree", bytes.NewBuffer(jsonPayload))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusCreated, w.Code)
+
+			var childResponse map[string]interface{}
+			err := json.Unmarshal(w.Body.Bytes(), &childResponse)
+			assert.NoError(t, err)
+			childID := int64(childResponse["id"].(float64))
+
+			// Create grandchildren
+			for _, grandchildLabel := range child.children {
+				grandchildPayload := models.CreateNodeRequest{
+					Label:    grandchildLabel,
+					ParentID: childID,
+				}
+				jsonPayload, _ := json.Marshal(grandchildPayload)
+				req, _ := http.NewRequest("POST", "/tree", bytes.NewBuffer(jsonPayload))
+				req.Header.Set("Content-Type", "application/json")
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusCreated, w.Code)
+			}
 		}
 	}
 
@@ -636,7 +707,7 @@ func TestMultipleTrees(t *testing.T) {
 			name:           "First page with 2 items",
 			query:          "?pageSize=2",
 			expectedCount:  2,  // Tree1 and Tree2
-			expectedTotal:  12, // Total number of nodes (3 root nodes + 9 children)
+			expectedTotal:  15, // Total number of nodes (3 root nodes + 9 children + 3 grandchildren)
 			expectedStatus: http.StatusOK,
 			expectedLabels: []string{"Tree1", "Tree2"},
 		},
@@ -644,7 +715,7 @@ func TestMultipleTrees(t *testing.T) {
 			name:           "Second page with 2 items",
 			query:          "?page=2&pageSize=2",
 			expectedCount:  1,  // Tree3
-			expectedTotal:  12, // Total number of nodes (3 root nodes + 9 children)
+			expectedTotal:  15, // Total number of nodes (3 root nodes + 9 children + 3 grandchildren)
 			expectedStatus: http.StatusOK,
 			expectedLabels: []string{"Tree3"},
 		},
