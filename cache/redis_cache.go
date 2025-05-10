@@ -7,8 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/ammiranda/tree_service/models"
-
 	"github.com/redis/go-redis/v9"
 )
 
@@ -48,37 +46,63 @@ func (c *RedisCache) Initialize() error {
 	return err
 }
 
-// GetTree retrieves the tree from cache if available
-func (c *RedisCache) GetTree() ([]*models.Node, bool) {
+// getRedisKey generates a cache key for the given page and pageSize
+func getRedisKey(page, pageSize int) string {
+	return fmt.Sprintf("tree:%d:%d", page, pageSize)
+}
+
+// GetPaginatedTree retrieves the paginated tree from cache if available
+func (c *RedisCache) GetPaginatedTree(page, pageSize int) (*PaginatedTreeResponse, bool) {
 	ctx := context.Background()
-	data, err := c.client.Get(ctx, "tree").Result()
+	key := getRedisKey(page, pageSize)
+
+	data, err := c.client.Get(ctx, key).Result()
 	if err != nil {
 		return nil, false
 	}
 
-	var nodes []*models.Node
-	if err := json.Unmarshal([]byte(data), &nodes); err != nil {
+	var response PaginatedTreeResponse
+	if err := json.Unmarshal([]byte(data), &response); err != nil {
 		return nil, false
 	}
 
-	return nodes, true
+	return &response, true
 }
 
-// SetTree stores the tree in cache
-func (c *RedisCache) SetTree(tree []*models.Node) {
+// SetPaginatedTree stores the paginated tree in cache
+func (c *RedisCache) SetPaginatedTree(page, pageSize int, response *PaginatedTreeResponse) {
 	ctx := context.Background()
-	data, err := json.Marshal(tree)
+	key := getRedisKey(page, pageSize)
+
+	data, err := json.Marshal(response)
 	if err != nil {
 		return
 	}
 
-	c.client.Set(ctx, "tree", data, c.ttl)
+	c.client.Set(ctx, key, data, c.ttl)
 }
 
-// InvalidateCache removes the tree from cache
+// InvalidateCache removes all cached data
 func (c *RedisCache) InvalidateCache() {
 	ctx := context.Background()
-	c.client.Del(ctx, "tree")
+	// Use scan to find and delete all tree:* keys
+	var cursor uint64
+	for {
+		var keys []string
+		var err error
+		keys, cursor, err = c.client.Scan(ctx, cursor, "tree:*", 100).Result()
+		if err != nil {
+			return
+		}
+
+		if len(keys) > 0 {
+			c.client.Del(ctx, keys...)
+		}
+
+		if cursor == 0 {
+			break
+		}
+	}
 }
 
 // SetCacheTTL sets the cache time-to-live duration

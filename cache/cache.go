@@ -14,21 +14,39 @@ var (
 	mu       sync.RWMutex
 )
 
+// PaginatedTreeResponse represents a paginated tree response
+type PaginatedTreeResponse struct {
+	Data       []*models.Node `json:"data"`
+	Pagination struct {
+		Page       int   `json:"page"`
+		PageSize   int   `json:"pageSize"`
+		Total      int64 `json:"total"`
+		TotalPages int64 `json:"totalPages"`
+		HasNext    bool  `json:"hasNext"`
+		HasPrev    bool  `json:"hasPrev"`
+	} `json:"pagination"`
+}
+
 // CacheProvider defines the interface for cache implementations.
 // It provides methods for caching and retrieving tree structures.
 type CacheProvider interface {
-	// GetTree retrieves the tree from cache if available.
-	// Returns:
-	//   - A slice of nodes representing the tree structure
-	//   - A boolean indicating whether the tree was found in cache
-	GetTree() ([]*models.Node, bool)
-
-	// SetTree stores the tree in cache.
+	// GetPaginatedTree retrieves the paginated tree from cache if available.
 	// Parameters:
-	//   - tree: The tree structure to cache
-	SetTree(tree []*models.Node)
+	//   - page: The page number
+	//   - pageSize: The size of each page
+	// Returns:
+	//   - The paginated tree response
+	//   - A boolean indicating whether the response was found in cache
+	GetPaginatedTree(page, pageSize int) (*PaginatedTreeResponse, bool)
 
-	// InvalidateCache removes the tree from cache.
+	// SetPaginatedTree stores the paginated tree in cache.
+	// Parameters:
+	//   - page: The page number
+	//   - pageSize: The size of each page
+	//   - response: The paginated tree response to cache
+	SetPaginatedTree(page, pageSize int, response *PaginatedTreeResponse)
+
+	// InvalidateCache removes all cached data.
 	// This is typically called when the tree structure is modified.
 	InvalidateCache()
 
@@ -59,21 +77,21 @@ func Initialize() error {
 	return err
 }
 
-// GetTree retrieves the tree from cache if available
-func GetTree() ([]*models.Node, bool) {
+// GetPaginatedTree retrieves the paginated tree from cache if available
+func GetPaginatedTree(page, pageSize int) (*PaginatedTreeResponse, bool) {
 	mu.RLock()
 	defer mu.RUnlock()
-	return provider.GetTree()
+	return provider.GetPaginatedTree(page, pageSize)
 }
 
-// SetTree stores the tree in cache
-func SetTree(tree []*models.Node) {
+// SetPaginatedTree stores the paginated tree in cache
+func SetPaginatedTree(page, pageSize int, response *PaginatedTreeResponse) {
 	mu.Lock()
 	defer mu.Unlock()
-	provider.SetTree(tree)
+	provider.SetPaginatedTree(page, pageSize, response)
 }
 
-// InvalidateCache removes the tree from cache
+// InvalidateCache removes all cached data
 func InvalidateCache() {
 	mu.Lock()
 	defer mu.Unlock()
