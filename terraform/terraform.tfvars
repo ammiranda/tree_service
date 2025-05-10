@@ -1,6 +1,6 @@
 aws_region = "us-east-1"
 project_name = "tree-service"
 environment = "dev"
-db_username = "admin"
+db_username = "tree_service_admin"
 db_password = "your-secure-password"
 db_name = "tree_db" 
