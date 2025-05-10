@@ -165,7 +165,7 @@ func (r *PostgresRepository) GetNode(ctx context.Context, id int64) (*Node, erro
 }
 
 // GetAllNodes retrieves all nodes from the database with pagination
-func (r *PostgresRepository) GetAllNodes(ctx context.Context, page, pageSize int) ([]*Node, int64, error) {
+func (r *PostgresRepository) GetAllNodes(ctx context.Context, page int, pageSize int) ([]*Node, int64, error) {
 	// Get total count
 	var total int64
 	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM nodes").Scan(&total)

@@ -1,24 +1,25 @@
 package cache
 
 import (
+	"fmt"
 	"sync"
 	"time"
-
-	"github.com/ammiranda/tree_service/models"
 )
 
 // MemoryCache implements CacheProvider using in-memory storage
 type MemoryCache struct {
-	mu     sync.RWMutex
-	data   []*models.Node
-	ttl    time.Duration
-	expiry time.Time
+	mu       sync.RWMutex
+	data     map[string]*PaginatedTreeResponse
+	ttl      time.Duration
+	expiries map[string]time.Time
 }
 
 // NewMemoryCache creates a new in-memory cache provider
 func NewMemoryCache() *MemoryCache {
 	return &MemoryCache{
-		ttl: 5 * time.Minute,
+		ttl:      5 * time.Minute,
+		data:     make(map[string]*PaginatedTreeResponse),
+		expiries: make(map[string]time.Time),
 	}
 }
 
@@ -27,34 +28,46 @@ func (c *MemoryCache) Initialize() error {
 	return nil
 }
 
-// GetTree retrieves the tree from cache if available
-func (c *MemoryCache) GetTree() ([]*models.Node, bool) {
+// getCacheKey generates a cache key for the given page and pageSize
+func getCacheKey(page, pageSize int) string {
+	return fmt.Sprintf("tree:%d:%d", page, pageSize)
+}
+
+// GetPaginatedTree retrieves the paginated tree from cache if available
+func (c *MemoryCache) GetPaginatedTree(page, pageSize int) (*PaginatedTreeResponse, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if c.data == nil || time.Now().After(c.expiry) {
+	key := getCacheKey(page, pageSize)
+	expiry, exists := c.expiries[key]
+	if !exists || time.Now().After(expiry) {
 		return nil, false
 	}
 
-	return c.data, true
+	if response, ok := c.data[key]; ok {
+		return response, true
+	}
+
+	return nil, false
 }
 
-// SetTree stores the tree in cache
-func (c *MemoryCache) SetTree(tree []*models.Node) {
+// SetPaginatedTree stores the paginated tree in cache
+func (c *MemoryCache) SetPaginatedTree(page, pageSize int, response *PaginatedTreeResponse) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.data = tree
-	c.expiry = time.Now().Add(c.ttl)
+	key := getCacheKey(page, pageSize)
+	c.data[key] = response
+	c.expiries[key] = time.Now().Add(c.ttl)
 }
 
-// InvalidateCache removes the tree from cache
+// InvalidateCache removes all cached data
 func (c *MemoryCache) InvalidateCache() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.data = nil
-	c.expiry = time.Time{}
+	c.data = make(map[string]*PaginatedTreeResponse)
+	c.expiries = make(map[string]time.Time)
 }
 
 // SetCacheTTL sets the cache time-to-live duration
@@ -63,7 +76,9 @@ func (c *MemoryCache) SetCacheTTL(ttl time.Duration) {
 	defer c.mu.Unlock()
 
 	c.ttl = ttl
-	if c.data != nil {
-		c.expiry = time.Now().Add(ttl)
+	// Update all existing expiries
+	now := time.Now()
+	for key := range c.data {
+		c.expiries[key] = now.Add(ttl)
 	}
 }

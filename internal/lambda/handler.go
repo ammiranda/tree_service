@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/ammiranda/tree_service/cache"
 	"github.com/ammiranda/tree_service/models"
@@ -42,15 +43,25 @@ func (h *Handler) Handle(ctx context.Context, request events.APIGatewayProxyRequ
 }
 
 func (h *Handler) handleGetTree(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	// Try to get from cache first
-	if cachedTree, found := cache.GetTree(); found {
-		if len(cachedTree) == 0 {
-			return events.APIGatewayProxyResponse{
-				StatusCode: 404,
-				Body:       `{"error": "tree not found"}`,
-			}, nil
+	// Get pagination parameters from query string
+	page := 1
+	pageSize := 100 // Default to larger page size for Lambda
+
+	if pageStr := request.QueryStringParameters["page"]; pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
 		}
-		body, err := json.Marshal(cachedTree)
+	}
+
+	if pageSizeStr := request.QueryStringParameters["pageSize"]; pageSizeStr != "" {
+		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
+			pageSize = ps
+		}
+	}
+
+	// Try to get from cache first
+	if cachedResponse, found := cache.GetPaginatedTree(page, pageSize); found {
+		body, err := json.Marshal(cachedResponse)
 		if err != nil {
 			return events.APIGatewayProxyResponse{
 				StatusCode: 500,
@@ -64,8 +75,7 @@ func (h *Handler) handleGetTree(ctx context.Context, request events.APIGatewayPr
 	}
 
 	// If not in cache, build from repository
-	// Default to first page with 100 items to get all nodes
-	nodes, total, err := h.repo.GetAllNodes(ctx, 1, 100)
+	nodes, total, err := h.repo.GetAllNodes(ctx, page, pageSize)
 	if err != nil {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
@@ -92,22 +102,26 @@ func (h *Handler) handleGetTree(ctx context.Context, request events.APIGatewayPr
 	// Build tree structure
 	rootNodes := buildTree(modelNodes, nodes)
 
-	// Store in cache
-	cache.SetTree(rootNodes)
+	// Calculate pagination metadata
+	totalPages := (total + int64(pageSize) - 1) / int64(pageSize)
+	hasNext := int64(page) < totalPages
+	hasPrev := page > 1
 
-	// Create response with pagination info
-	response := map[string]interface{}{
-		"data": rootNodes,
-		"pagination": map[string]interface{}{
-			"page":       1,
-			"pageSize":   100,
-			"total":      total,
-			"totalPages": (total + 99) / 100, // Ceiling division
-			"hasNext":    false,
-			"hasPrev":    false,
-		},
+	// Create response
+	response := &cache.PaginatedTreeResponse{
+		Data: rootNodes,
 	}
+	response.Pagination.Page = page
+	response.Pagination.PageSize = pageSize
+	response.Pagination.Total = total
+	response.Pagination.TotalPages = totalPages
+	response.Pagination.HasNext = hasNext
+	response.Pagination.HasPrev = hasPrev
 
+	// Store in cache
+	cache.SetPaginatedTree(page, pageSize, response)
+
+	// Marshal response
 	body, err := json.Marshal(response)
 	if err != nil {
 		return events.APIGatewayProxyResponse{
@@ -115,6 +129,7 @@ func (h *Handler) handleGetTree(ctx context.Context, request events.APIGatewayPr
 			Body:       fmt.Sprintf(`{"error": "Failed to marshal response: %v"}`, err),
 		}, nil
 	}
+
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Body:       string(body),

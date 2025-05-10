@@ -49,8 +49,14 @@ func TestGetTree(t *testing.T) {
 	defer cleanup()
 
 	// Create initial root node
-	_, err := repo.CreateNode(context.Background(), "root", nil)
+	rootID, err := repo.CreateNode(context.Background(), "root", nil)
 	assert.NoError(t, err)
+
+	// Create some child nodes
+	for i := 1; i <= 15; i++ {
+		_, err := repo.CreateNode(context.Background(), fmt.Sprintf("child_%d", i), &rootID)
+		assert.NoError(t, err)
+	}
 
 	// Create handler
 	handler := handlers.NewTreeHandler(repo)
@@ -58,29 +64,75 @@ func TestGetTree(t *testing.T) {
 	// Set up routes
 	router.GET("/tree", handler.GetTree)
 
-	// Create test request
+	// Test default pagination (page 1, pageSize 10)
 	req, _ := http.NewRequest("GET", "/tree", nil)
 	w := httptest.NewRecorder()
-
-	// Perform request
 	router.ServeHTTP(w, req)
 
-	// Assert response
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
+	var response cache.PaginatedTreeResponse
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 
-	// Check data
-	data := response["data"].([]interface{})
-	assert.Len(t, data, 1)
-	assert.Equal(t, "root", data[0].(map[string]interface{})["label"])
+	// Check pagination metadata
+	assert.Equal(t, 1, response.Pagination.Page)
+	assert.Equal(t, 10, response.Pagination.PageSize)
+	assert.Equal(t, int64(16), response.Pagination.Total) // root + 15 children
+	assert.Equal(t, int64(2), response.Pagination.TotalPages)
+	assert.True(t, response.Pagination.HasNext)
+	assert.False(t, response.Pagination.HasPrev)
 
-	// Check pagination
-	pagination := response["pagination"].(map[string]interface{})
-	assert.Equal(t, float64(1), pagination["total"])
-	assert.Equal(t, float64(10), pagination["pageSize"])
+	// Test second page
+	req, _ = http.NewRequest("GET", "/tree?page=2", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	// Check pagination metadata for second page
+	assert.Equal(t, 2, response.Pagination.Page)
+	assert.Equal(t, 10, response.Pagination.PageSize)
+	assert.Equal(t, int64(16), response.Pagination.Total)
+	assert.Equal(t, int64(2), response.Pagination.TotalPages)
+	assert.False(t, response.Pagination.HasNext)
+	assert.True(t, response.Pagination.HasPrev)
+
+	// Test custom page size
+	req, _ = http.NewRequest("GET", "/tree?pageSize=5", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	// Check pagination metadata for custom page size
+	assert.Equal(t, 1, response.Pagination.Page)
+	assert.Equal(t, 5, response.Pagination.PageSize)
+	assert.Equal(t, int64(16), response.Pagination.Total)
+	assert.Equal(t, int64(4), response.Pagination.TotalPages)
+	assert.True(t, response.Pagination.HasNext)
+	assert.False(t, response.Pagination.HasPrev)
+
+	// Test cache hit
+	req, _ = http.NewRequest("GET", "/tree?pageSize=5", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var cachedResponse cache.PaginatedTreeResponse
+	err = json.Unmarshal(w.Body.Bytes(), &cachedResponse)
+	assert.NoError(t, err)
+
+	// Verify cached response matches original
+	assert.Equal(t, response.Pagination, cachedResponse.Pagination)
+	assert.Equal(t, len(response.Data), len(cachedResponse.Data))
 }
 
 func TestGetTreeEmpty(t *testing.T) {
@@ -106,7 +158,19 @@ func TestGetTreeEmpty(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	// Assert response
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify response structure
+	var response cache.PaginatedTreeResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Empty(t, response.Data)
+	assert.Equal(t, 1, response.Pagination.Page)
+	assert.Equal(t, 10, response.Pagination.PageSize)
+	assert.Equal(t, int64(0), response.Pagination.Total)
+	assert.Equal(t, int64(0), response.Pagination.TotalPages)
+	assert.False(t, response.Pagination.HasNext)
+	assert.False(t, response.Pagination.HasPrev)
 }
 
 func TestCreateNode(t *testing.T) {
@@ -126,7 +190,8 @@ func TestCreateNode(t *testing.T) {
 	handler := handlers.NewTreeHandler(repo)
 
 	// Set up routes
-	router.POST("/node", handler.CreateNode)
+	router.POST("/tree", handler.CreateNode)
+	router.GET("/tree", handler.GetTree)
 
 	// Create test request
 	payload := models.CreateNodeRequest{
@@ -134,7 +199,7 @@ func TestCreateNode(t *testing.T) {
 		ParentID: rootID,
 	}
 	jsonPayload, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", "/node", bytes.NewBuffer(jsonPayload))
+	req, _ := http.NewRequest("POST", "/tree", bytes.NewBuffer(jsonPayload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -149,6 +214,18 @@ func TestCreateNode(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "child", response["label"])
 	assert.Equal(t, float64(rootID), response["parentId"])
+
+	// Verify cache was invalidated by checking if a new GET request hits the repository
+	req, _ = http.NewRequest("GET", "/tree", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var treeResponse cache.PaginatedTreeResponse
+	err = json.Unmarshal(w.Body.Bytes(), &treeResponse)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(treeResponse.Data)) // root + child but in one tree
 }
 
 func TestCreateNodeInvalidInput(t *testing.T) {
@@ -351,6 +428,7 @@ func TestGetTreePagination(t *testing.T) {
 		expectedCount  int
 		expectedTotal  int64
 		expectedStatus int
+		expectedError  string
 	}{
 		{
 			name:           "Default pagination",
@@ -365,6 +443,37 @@ func TestGetTreePagination(t *testing.T) {
 			expectedCount:  5,
 			expectedTotal:  15,
 			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Maximum page size",
+			query:          "?pageSize=100",
+			expectedCount:  15,
+			expectedTotal:  15,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Exceeds maximum page size",
+			query:          "?pageSize=101",
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "page size cannot exceed 100",
+		},
+		{
+			name:           "Invalid page size",
+			query:          "?pageSize=invalid",
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "invalid page size",
+		},
+		{
+			name:           "Zero page size",
+			query:          "?pageSize=0",
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "page size must be greater than 0",
+		},
+		{
+			name:           "Negative page size",
+			query:          "?pageSize=-1",
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "page size must be greater than 0",
 		},
 		{
 			name:           "Second page",
@@ -387,40 +496,32 @@ func TestGetTreePagination(t *testing.T) {
 			expectedTotal:  15,
 			expectedStatus: http.StatusOK,
 		},
-		{
-			name:           "Invalid page size",
-			query:          "?pageSize=200",
-			expectedCount:  10,
-			expectedTotal:  15,
-			expectedStatus: http.StatusOK,
-		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create test request
 			req, _ := http.NewRequest("GET", "/tree"+tc.query, nil)
 			w := httptest.NewRecorder()
-
-			// Perform request
 			router.ServeHTTP(w, req)
 
-			// Assert response
 			assert.Equal(t, tc.expectedStatus, w.Code)
 
 			if tc.expectedStatus == http.StatusOK {
-				var response map[string]interface{}
+				var response cache.PaginatedTreeResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				assert.NoError(t, err)
 
 				// Check data
-				data := response["data"].([]interface{})
-				assert.Len(t, data, tc.expectedCount)
+				assert.Len(t, response.Data, tc.expectedCount)
 
 				// Check pagination
-				pagination := response["pagination"].(map[string]interface{})
-				assert.Equal(t, float64(tc.expectedTotal), pagination["total"])
-				assert.Equal(t, float64(tc.expectedCount), pagination["pageSize"])
+				assert.Equal(t, tc.expectedTotal, response.Pagination.Total)
+				assert.Equal(t, tc.expectedCount, len(response.Data))
+			} else {
+				var errorResponse map[string]string
+				err := json.Unmarshal(w.Body.Bytes(), &errorResponse)
+				assert.NoError(t, err)
+				assert.Equal(t, tc.expectedError, errorResponse["error"])
 			}
 		})
 	}
@@ -464,24 +565,34 @@ func TestMultipleTrees(t *testing.T) {
 
 	rootIDs := make([]int64, len(treeStructures))
 
-	// Create root nodes
+	// Create root nodes first
 	for i, tree := range treeStructures {
 		// Create root node
-		rootID, err := repo.CreateNode(context.Background(), tree.rootLabel, nil)
+		payload := models.CreateNodeRequest{
+			Label: tree.rootLabel,
+		}
+		jsonPayload, _ := json.Marshal(payload)
+		req, _ := http.NewRequest("POST", "/tree", bytes.NewBuffer(jsonPayload))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusCreated, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
 		assert.NoError(t, err)
-		rootIDs[i] = rootID
+		rootIDs[i] = int64(response["id"].(float64))
 
 		// Create children for this tree
 		for _, childLabel := range tree.children {
 			payload := models.CreateNodeRequest{
 				Label:    childLabel,
-				ParentID: rootID,
+				ParentID: rootIDs[i],
 			}
 			jsonPayload, _ := json.Marshal(payload)
 			req, _ := http.NewRequest("POST", "/tree", bytes.NewBuffer(jsonPayload))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
-
 			router.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusCreated, w.Code)
 		}
@@ -494,22 +605,22 @@ func TestMultipleTrees(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
+	var response cache.PaginatedTreeResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 
 	// Check data
-	data := response["data"].([]interface{})
-	assert.Len(t, data, 3) // Should have 3 root nodes
+	assert.NotNil(t, response.Data, "Response data should not be nil")
+	assert.Len(t, response.Data, 3) // Should have 3 root nodes
 
 	// Verify each tree's structure
-	for i, rootNode := range data {
-		nodeMap := rootNode.(map[string]interface{})
-		assert.Equal(t, treeStructures[i].rootLabel, nodeMap["label"])
+	for i, rootNode := range response.Data {
+		assert.NotNil(t, rootNode, "Root node should not be nil")
+		assert.Equal(t, treeStructures[i].rootLabel, rootNode.Label)
 
 		// Get children count
-		children := nodeMap["children"].([]interface{})
-		assert.Len(t, children, len(treeStructures[i].children))
+		assert.NotNil(t, rootNode.Children, "Children slice should not be nil")
+		assert.Len(t, rootNode.Children, len(treeStructures[i].children))
 	}
 
 	// Test pagination with multiple trees
@@ -519,20 +630,23 @@ func TestMultipleTrees(t *testing.T) {
 		expectedCount  int
 		expectedTotal  int64
 		expectedStatus int
+		expectedLabels []string
 	}{
 		{
 			name:           "First page with 2 items",
 			query:          "?pageSize=2",
-			expectedCount:  2,
-			expectedTotal:  3,
+			expectedCount:  2,  // Tree1 and Tree2
+			expectedTotal:  12, // Total number of nodes (3 root nodes + 9 children)
 			expectedStatus: http.StatusOK,
+			expectedLabels: []string{"Tree1", "Tree2"},
 		},
 		{
 			name:           "Second page with 2 items",
 			query:          "?page=2&pageSize=2",
-			expectedCount:  1,
-			expectedTotal:  3,
+			expectedCount:  1,  // Tree3
+			expectedTotal:  12, // Total number of nodes (3 root nodes + 9 children)
 			expectedStatus: http.StatusOK,
+			expectedLabels: []string{"Tree3"},
 		},
 	}
 
@@ -544,15 +658,23 @@ func TestMultipleTrees(t *testing.T) {
 
 			assert.Equal(t, tc.expectedStatus, w.Code)
 
-			var response map[string]interface{}
-			err := json.Unmarshal(w.Body.Bytes(), &response)
+			var pageResponse cache.PaginatedTreeResponse
+			err := json.Unmarshal(w.Body.Bytes(), &pageResponse)
 			assert.NoError(t, err)
 
-			data := response["data"].([]interface{})
-			assert.Len(t, data, tc.expectedCount)
+			assert.NotNil(t, pageResponse.Data, "Response data should not be nil")
+			assert.Len(t, pageResponse.Data, tc.expectedCount)
 
-			pagination := response["pagination"].(map[string]interface{})
-			assert.Equal(t, float64(tc.expectedTotal), pagination["total"])
+			// Verify we got the expected root nodes
+			for i, expectedLabel := range tc.expectedLabels {
+				if i < len(pageResponse.Data) { // Only check if we have enough data
+					assert.Equal(t, expectedLabel, pageResponse.Data[i].Label,
+						fmt.Sprintf("Expected root node %d to have label %s", i, expectedLabel))
+				}
+			}
+
+			assert.Equal(t, tc.expectedTotal, pageResponse.Pagination.Total)
+			assert.Equal(t, tc.expectedCount, len(pageResponse.Data))
 		})
 	}
 

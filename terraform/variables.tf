@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region to deploy resources"
   type        = string
-  default     = "us-west-2"
+  default     = "us-east-2"
 }
 
 variable "project_name" {
@@ -55,7 +55,7 @@ variable "db_name" {
 variable "db_username" {
   description = "Username for RDS instance"
   type        = string
-  default     = "postgres"
+  sensitive   = true
 }
 
 variable "db_password" {
@@ -71,4 +71,10 @@ variable "tags" {
     Environment = "production"
     Project     = "tree-api"
   }
+}
+
+variable "environment" {
+  description = "Environment name (e.g., dev, prod)"
+  type        = string
+  default     = "dev"
 } 

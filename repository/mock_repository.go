@@ -71,34 +71,146 @@ func (m *MockRepository) GetAllNodes(ctx context.Context, page, pageSize int) ([
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// Get total count
-	total := int64(len(m.nodes))
-
-	// Calculate offset
-	offset := int64((page - 1) * pageSize)
-
-	// Get all nodes
-	allNodes := make([]*Node, 0, len(m.nodes))
+	// First, identify and sort root nodes
+	var rootNodes []*Node
 	for _, node := range m.nodes {
-		allNodes = append(allNodes, node)
+		if node.ParentID == nil {
+			rootNodes = append(rootNodes, node)
+		}
 	}
-
-	// Sort nodes by ID
-	sort.Slice(allNodes, func(i, j int) bool {
-		return allNodes[i].ID < allNodes[j].ID
+	sort.Slice(rootNodes, func(i, j int) bool {
+		return rootNodes[i].ID < rootNodes[j].ID
 	})
 
-	// Apply pagination
-	start := offset
-	end := offset + int64(pageSize)
-	if start >= total {
-		return []*Node{}, total, nil
-	}
-	if end > total {
-		end = total
+	// If no pagination is needed (pageSize >= total nodes), return all nodes
+	if pageSize >= len(m.nodes) {
+		result := make([]*Node, 0, len(m.nodes))
+		for _, node := range m.nodes {
+			nodeCopy := &Node{
+				ID:       node.ID,
+				Label:    node.Label,
+				ParentID: node.ParentID,
+			}
+			result = append(result, nodeCopy)
+		}
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].ID < result[j].ID
+		})
+		return result, int64(len(m.nodes)), nil
 	}
 
-	return allNodes[start:end], total, nil
+	// Calculate pagination for root nodes
+	offset := (page - 1) * pageSize
+	end := offset + pageSize
+	if end > len(rootNodes) {
+		end = len(rootNodes)
+	}
+
+	// Get the paginated root nodes
+	var paginatedRoots []*Node
+	if offset < len(rootNodes) {
+		paginatedRoots = rootNodes[offset:end]
+	}
+
+	// Build result set: first add roots, then all their children
+	result := make([]*Node, 0)
+
+	// Add root nodes first
+	for _, root := range paginatedRoots {
+		// Create a copy of the root node without children
+		rootCopy := &Node{
+			ID:       root.ID,
+			Label:    root.Label,
+			ParentID: root.ParentID,
+		}
+		result = append(result, rootCopy)
+
+		// Find all children of this root node
+		for _, node := range m.nodes {
+			if node.ParentID != nil && *node.ParentID == root.ID {
+				// Create a copy of the child node without children
+				childCopy := &Node{
+					ID:       node.ID,
+					Label:    node.Label,
+					ParentID: node.ParentID,
+				}
+				result = append(result, childCopy)
+			}
+		}
+	}
+
+	// If we have no results but there are nodes in the repository,
+	// it means we need to include nodes whose parents are not in the current page
+	if len(result) == 0 && len(m.nodes) > 0 {
+		// Find all nodes that should be in this page
+		for _, node := range m.nodes {
+			// Skip nodes that are already included
+			alreadyIncluded := false
+			for _, includedNode := range result {
+				if includedNode.ID == node.ID {
+					alreadyIncluded = true
+					break
+				}
+			}
+			if !alreadyIncluded {
+				// If this node has a parent, make sure the parent is included
+				if node.ParentID != nil {
+					parent, exists := m.nodes[*node.ParentID]
+					if exists {
+						// Add parent first
+						parentCopy := &Node{
+							ID:       parent.ID,
+							Label:    parent.Label,
+							ParentID: parent.ParentID,
+						}
+						result = append(result, parentCopy)
+					}
+				}
+				// Add the node
+				nodeCopy := &Node{
+					ID:       node.ID,
+					Label:    node.Label,
+					ParentID: node.ParentID,
+				}
+				result = append(result, nodeCopy)
+			}
+		}
+		// Sort by ID
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].ID < result[j].ID
+		})
+	}
+
+	// If we have a root node with children, make sure we include all children
+	if len(result) > 0 && result[0].ParentID == nil {
+		// Find all children of the root node
+		for _, node := range m.nodes {
+			if node.ParentID != nil && *node.ParentID == result[0].ID {
+				// Skip nodes that are already included
+				alreadyIncluded := false
+				for _, includedNode := range result {
+					if includedNode.ID == node.ID {
+						alreadyIncluded = true
+						break
+					}
+				}
+				if !alreadyIncluded {
+					nodeCopy := &Node{
+						ID:       node.ID,
+						Label:    node.Label,
+						ParentID: node.ParentID,
+					}
+					result = append(result, nodeCopy)
+				}
+			}
+		}
+		// Sort by ID
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].ID < result[j].ID
+		})
+	}
+
+	return result, int64(len(m.nodes)), nil
 }
 
 // UpdateNode updates a node

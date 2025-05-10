@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -10,6 +11,11 @@ import (
 	"github.com/ammiranda/tree_service/repository"
 
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	defaultPageSize = 10
+	maxPageSize     = 100
 )
 
 var (
@@ -43,27 +49,27 @@ func BuildTreeFromNodes(nodes []*repository.Node) ([]*models.Node, error) {
 		modelNode := models.NewNode(node.Label)
 		modelNode.ID = node.ID
 		nodeMap[node.ID] = modelNode
+	}
 
-		// If it's a root node (no parent), add it to rootNodes
+	// Second pass: connect children to parents and identify root/orphaned nodes
+	for _, node := range nodes {
+		modelNode := nodeMap[node.ID]
+
 		if node.ParentID == nil {
+			// This is a root node
+			rootNodes = append(rootNodes, modelNode)
+		} else if parent, exists := nodeMap[*node.ParentID]; exists {
+			// Parent is in the current page, add as child
+			parent.AddChild(modelNode)
+		} else {
+			// Parent is not in the current page, treat as root
 			rootNodes = append(rootNodes, modelNode)
 		}
 	}
 
-	// Check if we found any root nodes
+	// If we found no nodes to return, consider it not found
 	if len(rootNodes) == 0 {
 		return nil, ErrTreeNotFound
-	}
-
-	// Second pass: build the tree structure
-	for _, node := range nodes {
-		if node.ParentID != nil {
-			if parent, exists := nodeMap[*node.ParentID]; exists {
-				if child, exists := nodeMap[node.ID]; exists {
-					parent.AddChild(child)
-				}
-			}
-		}
 	}
 
 	return rootNodes, nil
@@ -73,7 +79,7 @@ func BuildTreeFromNodes(nodes []*repository.Node) ([]*models.Node, error) {
 func (h *TreeHandler) GetTree(c *gin.Context) {
 	// Get pagination parameters
 	page := 1
-	pageSize := 10
+	pageSize := defaultPageSize
 
 	// Parse page parameter
 	if pageStr := c.Query("page"); pageStr != "" {
@@ -84,98 +90,67 @@ func (h *TreeHandler) GetTree(c *gin.Context) {
 
 	// Parse pageSize parameter
 	if pageSizeStr := c.Query("pageSize"); pageSizeStr != "" {
-		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
-			pageSize = ps
+		ps, err := strconv.Atoi(pageSizeStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid page size"})
+			return
 		}
+		if ps <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "page size must be greater than 0"})
+			return
+		}
+		if ps > maxPageSize {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("page size cannot exceed %d", maxPageSize)})
+			return
+		}
+		pageSize = ps
 	}
 
 	// Try to get from cache first
-	if cachedTree, found := cache.GetTree(); found {
-		if len(cachedTree) == 0 {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "tree not found"})
-			return
-		}
-
-		// Apply pagination to cached data
-		total := int64(len(cachedTree))
-		start := (page - 1) * pageSize
-		end := start + pageSize
-		if start >= len(cachedTree) {
-			start = len(cachedTree)
-		}
-		if end > len(cachedTree) {
-			end = len(cachedTree)
-		}
-
-		// Calculate pagination metadata
-		totalPages := (total + int64(pageSize) - 1) / int64(pageSize)
-		hasNext := int64(page) < totalPages
-		hasPrev := page > 1
-
-		// Return paginated response
-		c.JSON(http.StatusOK, gin.H{
-			"data": cachedTree[start:end],
-			"pagination": gin.H{
-				"page":       page,
-				"pageSize":   pageSize,
-				"total":      total,
-				"totalPages": totalPages,
-				"hasNext":    hasNext,
-				"hasPrev":    hasPrev,
-			},
-		})
+	if cachedResponse, found := cache.GetPaginatedTree(page, pageSize); found {
+		c.JSON(http.StatusOK, cachedResponse)
 		return
 	}
 
 	// If not in cache, get all nodes from repository
 	ctx := c.Request.Context()
-	allNodes, total, err := h.repo.GetAllNodes(ctx, 1, 1000) // Get all nodes
+	allNodes, total, err := h.repo.GetAllNodes(ctx, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	// Build tree structure
-	rootNodes, err := BuildTreeFromNodes(allNodes)
-	if err != nil {
-		if errors.Is(err, ErrTreeNotFound) {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "tree not found"})
+	// Create response
+	response := &cache.PaginatedTreeResponse{
+		Data: make([]*models.Node, 0),
+	}
+	response.Pagination.Page = page
+	response.Pagination.PageSize = pageSize
+	response.Pagination.Total = total
+	response.Pagination.TotalPages = (total + int64(pageSize) - 1) / int64(pageSize)
+	response.Pagination.HasNext = int64(page) < response.Pagination.TotalPages
+	response.Pagination.HasPrev = page > 1
+
+	// If we have nodes, build the tree structure
+	if len(allNodes) > 0 {
+		rootNodes, err := BuildTreeFromNodes(allNodes)
+		if err != nil {
+			if errors.Is(err, ErrTreeNotFound) {
+				// Return empty response instead of 404
+				c.JSON(http.StatusOK, response)
+				return
+			}
+			c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		response.Data = rootNodes
 	}
 
-	// Store complete tree in cache
-	cache.SetTree(rootNodes)
+	// Store in cache
+	cache.SetPaginatedTree(page, pageSize, response)
 
-	// Apply pagination
-	start := (page - 1) * pageSize
-	end := start + pageSize
-	if start >= len(rootNodes) {
-		start = len(rootNodes)
-	}
-	if end > len(rootNodes) {
-		end = len(rootNodes)
-	}
-
-	// Calculate pagination metadata
-	totalPages := (total + int64(pageSize) - 1) / int64(pageSize)
-	hasNext := int64(page) < totalPages
-	hasPrev := page > 1
-
-	// Return paginated response
-	c.JSON(http.StatusOK, gin.H{
-		"data": rootNodes[start:end],
-		"pagination": gin.H{
-			"page":       page,
-			"pageSize":   pageSize,
-			"total":      total,
-			"totalPages": totalPages,
-			"hasNext":    hasNext,
-			"hasPrev":    hasPrev,
-		},
-	})
+	// Return response
+	c.JSON(http.StatusOK, response)
 }
 
 // CreateNode creates a new node in the tree
