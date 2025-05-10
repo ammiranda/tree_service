@@ -55,6 +55,7 @@ func main() {
 	{
 		api.GET("/tree", treeHandler.GetTree)
 		api.POST("/tree", treeHandler.CreateNode)
+		api.PUT("/node/:id", treeHandler.UpdateNode)
 	}
 
 	// Start server
