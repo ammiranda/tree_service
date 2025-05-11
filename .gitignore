@@ -18,6 +18,13 @@ terraform.rc
 volume/
 volume/**/*
 
+# Test files and directories
+test/
+test/**/*
+*.test.db
+*.test.sqlite
+*.test.sqlite3
+
 # Go
 *.exe
 *.exe~
