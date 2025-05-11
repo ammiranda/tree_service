@@ -84,9 +84,9 @@ resource "aws_lambda_function" "api" {
   function_name = "tree-service-api"
   role          = aws_iam_role.lambda.arn
   package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.app.repository_url}:latest"
-  timeout       = 30
-  memory_size   = 256
+  image_uri     = "${aws_ecr_repository.app.repository_url}:lambda-classic"
+  timeout       = 60
+  memory_size   = 512
 
   vpc_config {
     subnet_ids         = module.vpc.private_subnets
@@ -241,10 +241,13 @@ resource "aws_iam_role_policy" "lambda" {
           "ec2:CreateNetworkInterface",
           "ec2:DescribeNetworkInterfaces",
           "ec2:DeleteNetworkInterface",
+          "ec2:AssignPrivateIpAddresses",
+          "ec2:UnassignPrivateIpAddresses",
           # CloudWatch Logs
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents",
+          "logs:DescribeLogStreams",
           # ECR Access
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage",

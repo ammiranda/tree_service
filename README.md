@@ -6,7 +6,7 @@ A RESTful API service for managing hierarchical tree structures. The service pro
 
 - CRUD operations for tree nodes
 - Pagination support
-- Caching with DynamoDB (optional)
+- Caching with Redis
 - PostgreSQL database backend
 - Comprehensive test coverage
 
@@ -14,54 +14,118 @@ A RESTful API service for managing hierarchical tree structures. The service pro
 
 - Go 1.21 or later
 - PostgreSQL 12 or later
+- Redis (for caching)
 - Docker (optional, for containerized deployment)
-- AWS CLI (optional, for DynamoDB cache)
+- AWS CLI (for AWS deployment)
 
-## Local Setup
+## Local Development
 
-1. Clone the repository:
+### 1. Set up the Database
+
 ```bash
-git clone <repository-url>
-cd tree-service
+# Create the database
+createdb tree_service
+
+# Create the test database
+createdb tree_service_test
 ```
 
-2. Set up environment variables:
+### 2. Set up Environment Variables
+
+Create a `.env` file in the root directory:
+
 ```bash
 # Database configuration
-export DB_HOST=localhost
-export DB_PORT=5432
-export DB_NAME=tree_service
-export DB_USER=postgres
-export DB_PASSWORD=your_password
-export DB_SSL_MODE=disable
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=tree_service
+DB_USER=postgres
+DB_PASSWORD=your_password
+DB_SSL_MODE=disable
 
-# AWS configuration (if using DynamoDB cache)
-export AWS_ACCESS_KEY_ID=your_access_key
-export AWS_SECRET_ACCESS_KEY=your_secret_key
-export AWS_REGION=your_region
+# Redis configuration
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# Application configuration
+APP_ENV=development
+PORT=8080
 ```
 
-3. Create the database:
-```bash
-createdb tree_service
-```
+### 3. Install Dependencies
 
-4. Install dependencies:
 ```bash
 go mod download
 ```
 
-5. Run migrations:
+### 4. Run Migrations
+
 ```bash
 go run cmd/migrate/main.go
 ```
 
-6. Start the server:
+### 5. Start the Server
+
 ```bash
 go run main.go
 ```
 
 The server will start on `http://localhost:8080`.
+
+## Running Tests
+
+### 1. Set up Test Environment
+
+Create a `.env.test` file:
+
+```bash
+# Database configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=tree_service_test
+DB_USER=postgres
+DB_PASSWORD=your_password
+DB_SSL_MODE=disable
+
+# Redis configuration
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# Application configuration
+APP_ENV=test
+PORT=8081
+```
+
+### 2. Run Tests
+
+```bash
+# Run all tests
+go test ./...
+
+# Run specific test packages
+go test ./tests/...
+go test ./handlers/...
+go test ./repository/...
+
+# Run with coverage
+go test -cover ./...
+
+# Run with verbose output
+go test -v ./...
+
+# Run a specific test
+go test -v ./tests -run TestCache
+```
+
+### 3. Test Coverage
+
+```bash
+# Generate coverage report
+go test -coverprofile=coverage.out ./...
+
+# View coverage in browser
+go tool cover -html=coverage.out
+```
 
 ## API Endpoints
 
@@ -157,33 +221,7 @@ Deletes a node and all its children.
 
 Response: 204 No Content
 
-## Running Tests
-
-1. Set up test environment:
-```bash
-export APP_ENV=test
-export DB_NAME=tree_service_test
-```
-
-2. Run all tests:
-```bash
-go test ./...
-```
-
-3. Run specific test packages:
-```bash
-go test ./tests/...
-go test ./handlers/...
-```
-
-4. Run with coverage:
-```bash
-go test -cover ./...
-```
-
-## Development
-
-### Project Structure
+## Project Structure
 ```
 .
 ├── cache/           # Cache implementations
@@ -196,19 +234,28 @@ go test -cover ./...
 └── tests/          # Test suites
 ```
 
+## Development
+
 ### Adding New Features
 
-1. Create a new branch:
-```bash
-git checkout -b feature/your-feature-name
-```
+1. Create a new branch for your feature
+2. Write tests first (TDD approach)
+3. Implement the feature
+4. Run all tests to ensure nothing is broken
+5. Submit a pull request
 
-2. Make your changes and run tests:
-```bash
-go test ./...
-```
+### Code Style
 
-3. Submit a pull request
+- Follow Go's standard formatting: `go fmt ./...`
+- Run linter: `golangci-lint run`
+- Write tests for new features
+- Update documentation as needed
+
+### Debugging
+
+- Use `go run main.go -debug` for debug logging
+- Check logs in `logs/` directory
+- Use `go test -v` for verbose test output
 
 ## Deployment
 
