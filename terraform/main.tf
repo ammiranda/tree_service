@@ -40,22 +40,22 @@ module "vpc" {
 
 # RDS Instance
 resource "aws_db_instance" "postgres" {
-  identifier           = "tree-service-db"
-  engine              = "postgres"
-  engine_version      = "14"
-  instance_class      = "db.t3.micro"
-  allocated_storage   = 20
-  storage_type        = "gp2"
-  
-  db_name             = "tree_service"
-  username            = var.db_username
-  password            = var.db_password
+  identifier        = "tree-service-db"
+  engine            = "postgres"
+  engine_version    = "14"
+  instance_class    = "db.t3.micro"
+  allocated_storage = 20
+  storage_type      = "gp2"
+
+  db_name  = "tree_service"
+  username = var.db_username
+  password = var.db_password
 
   vpc_security_group_ids = [aws_security_group.rds.id]
   db_subnet_group_name   = aws_db_subnet_group.main.name
 
   backup_retention_period = 7
-  skip_final_snapshot    = true
+  skip_final_snapshot     = true
 
   tags = {
     Environment = var.environment
@@ -64,13 +64,13 @@ resource "aws_db_instance" "postgres" {
 
 # ElastiCache Redis Cluster
 resource "aws_elasticache_cluster" "redis" {
-  cluster_id           = "tree-service-cache"
-  engine              = "redis"
-  node_type           = "cache.t3.micro"
-  num_cache_nodes     = 1
-  port                = 6379
-  subnet_group_name   = aws_elasticache_subnet_group.redis.name
-  security_group_ids  = [aws_security_group.redis.id]
+  cluster_id         = "tree-service-cache"
+  engine             = "redis"
+  node_type          = "cache.t3.micro"
+  num_cache_nodes    = 1
+  port               = 6379
+  subnet_group_name  = aws_elasticache_subnet_group.redis.name
+  security_group_ids = [aws_security_group.redis.id]
 }
 
 # ElastiCache Subnet Group
@@ -81,12 +81,12 @@ resource "aws_elasticache_subnet_group" "redis" {
 
 # Lambda Function
 resource "aws_lambda_function" "api" {
-  function_name    = "tree-service-api"
-  role            = aws_iam_role.lambda.arn
-  package_type    = "Image"
-  image_uri       = "${aws_ecr_repository.app.repository_url}:latest"
-  timeout         = 30
-  memory_size     = 256
+  function_name = "tree-service-api"
+  role          = aws_iam_role.lambda.arn
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.app.repository_url}:latest"
+  timeout       = 30
+  memory_size   = 256
 
   vpc_config {
     subnet_ids         = module.vpc.private_subnets
@@ -113,8 +113,8 @@ resource "aws_apigatewayv2_api" "api" {
 }
 
 resource "aws_apigatewayv2_stage" "api" {
-  api_id = aws_apigatewayv2_api.api.id
-  name   = "prod"
+  api_id      = aws_apigatewayv2_api.api.id
+  name        = "prod"
   auto_deploy = true
 }
 
