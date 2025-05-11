@@ -122,8 +122,7 @@ resource "aws_apigatewayv2_integration" "lambda" {
   api_id           = aws_apigatewayv2_api.api.id
   integration_type = "AWS_PROXY"
 
-  connection_type    = "VPC_LINK"
-  connection_id      = aws_apigatewayv2_vpc_link.api.id
+  connection_type    = "INTERNET"
   description        = "Lambda integration"
   integration_method = "POST"
   integration_uri    = aws_lambda_function.api.invoke_arn
@@ -151,6 +150,15 @@ resource "aws_apigatewayv2_route" "delete_node" {
   api_id    = aws_apigatewayv2_api.api.id
   route_key = "DELETE /api/tree/{id}"
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+# Lambda permission for API Gateway
+resource "aws_lambda_permission" "api_gw" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.api.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
 }
 
 # VPC Link for API Gateway
