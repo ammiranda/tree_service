@@ -93,8 +93,22 @@ jobs:
           echo "Image not found after 5 attempts"
           exit 1
 
-      - name: Update Lambda function
+      - name: Wait for Lambda function and update
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          aws lambda update-function-code \
-            --function-name tree-service-api \
-            --image-uri ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:${{ github.sha }} 
+          # Wait for Lambda function to exist (with retries)
+          for i in {1..12}; do
+            if aws lambda get-function --function-name tree-service-api 2>/dev/null; then
+              echo "Lambda function found, updating..."
+              aws lambda update-function-code \
+                --function-name tree-service-api \
+                --image-uri $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+              exit 0
+            fi
+            echo "Lambda function not found, waiting 30 seconds... (attempt $i of 12)"
+            sleep 30
+          done
+          echo "Lambda function not found after 6 minutes"
+          exit 1 
