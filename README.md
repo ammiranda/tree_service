@@ -20,6 +20,27 @@ A RESTful API service for managing hierarchical tree structures. The service pro
 
 ## Local Development
 
+### Option 1: Using Docker Compose (Recommended)
+
+The easiest way to run the application locally is using Docker Compose, which will set up all required services (PostgreSQL, Redis, and LocalStack) automatically.
+
+1. Start all services:
+```bash
+make dev-start
+```
+
+2. Stop all services:
+```bash
+make dev-stop
+```
+
+3. View logs:
+```bash
+docker-compose logs -f
+```
+
+### Option 2: Manual Setup
+
 ### 1. Set up the Database
 
 ```bash
@@ -256,6 +277,80 @@ Response: 204 No Content
 - Use `go run main.go -debug` for debug logging
 - Check logs in `logs/` directory
 - Use `go test -v` for verbose test output
+
+## Development Commands
+
+The project includes a Makefile with several useful commands:
+
+### Build Commands
+```bash
+make build          # Build the application
+make build-lambda   # Build the Lambda function
+```
+
+### Testing Commands
+```bash
+make test          # Run tests
+make coverage      # Run tests with coverage
+make lint          # Run linter
+make fmt           # Format code
+```
+
+### Docker Commands
+```bash
+make docker-build  # Build Docker image
+make docker-run    # Run Docker containers
+```
+
+### Development Environment
+```bash
+make dev-start     # Start development environment
+make dev-stop      # Stop development environment
+```
+
+### LocalStack Commands
+```bash
+make localstack-init    # Initialize LocalStack resources
+make localstack-restore # Restore LocalStack state
+make localstack-logs    # Show LocalStack logs
+```
+
+### Cleanup
+```bash
+make clean         # Clean up build artifacts
+```
+
+For a complete list of available commands:
+```bash
+make help
+```
+
+## Docker Compose Services
+
+The `docker-compose.yml` file sets up the following services:
+
+- **app**: The main application service
+  - Port: 8080
+  - Environment variables configured for development
+  - Depends on PostgreSQL, Redis, and LocalStack
+
+- **postgres**: PostgreSQL database
+  - Port: 5432
+  - Database: tree_db
+  - User: postgres
+  - Password: postgres
+  - Persistent volume for data storage
+
+- **redis**: Redis cache
+  - Port: 6380 (mapped to container port 6379)
+  - Persistent volume for data storage
+
+- **localstack**: AWS service emulator
+  - Port: 4566
+  - Emulates AWS services (RDS, ElastiCache, Secrets Manager, Lambda, API Gateway)
+  - Persistent volume for state storage
+
+All services are connected through a bridge network named `app-network`.
 
 ## Deployment
 
