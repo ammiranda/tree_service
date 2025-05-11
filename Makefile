@@ -13,7 +13,7 @@ GOFILES?=$$(find . -name '*.go' -not -path "./vendor/*")
 GREEN=\033[0;32m
 NC=\033[0m # No Color
 
-.PHONY: all build clean test coverage lint fmt docker-build docker-run terraform-init terraform-plan terraform-apply terraform-destroy dev-start dev-stop localstack-init localstack-restore localstack-logs
+.PHONY: all build clean test coverage lint fmt docker-build docker-run terraform-init terraform-plan terraform-apply terraform-destroy dev-start dev-stop localstack-init localstack-restore localstack-logs test-api
 
 all: clean build
 
@@ -95,6 +95,12 @@ localstack-logs:
 	@echo "$(GREEN)Showing LocalStack logs...$(NC)"
 	$(DOCKER_COMPOSE) logs -f localstack
 
+# API Tests
+test-api:
+	@echo "$(GREEN)Running API tests...$(NC)"
+	@chmod +x scripts/test_api.sh
+	@./scripts/test_api.sh
+
 # Cleanup
 clean:
 	@echo "$(GREEN)Cleaning up...$(NC)"
@@ -123,4 +129,5 @@ help:
 	@echo "  make localstack-init   - Initialize LocalStack resources"
 	@echo "  make localstack-restore - Restore LocalStack state"
 	@echo "  make localstack-logs   - Show LocalStack logs"
+	@echo "  make test-api        - Run API tests"
 	@echo "  make clean         - Clean up build artifacts" 
