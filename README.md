@@ -374,4 +374,45 @@ The service can be deployed as an AWS Lambda function. See `cmd/lambda/main.go` 
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Security
+
+### Sensitive Files
+
+The following types of files should never be committed to the repository:
+
+- SSL/TLS certificates and keys (`.pem`, `.key`, `.crt`)
+- SSH keys
+- Environment files (`.env`, `.env.*`)
+- AWS credentials (`aws.json`, `aws-credentials.json`)
+- Any other files containing secrets or credentials
+
+These files are already excluded in `.gitignore`, but it's important to be aware of this policy.
+
+### Local Development State
+
+The `volume/` directory contains local development state and should never be committed to the repository. This includes:
+- LocalStack state and cache
+- Temporary files
+- Local development certificates
+- Machine-specific configurations
+
+This directory is automatically created by Docker Compose and LocalStack, and is excluded from version control.
+
+### Handling Sensitive Files
+
+1. For local development:
+   - Create a `.env` file based on `.env.example`
+   - Store certificates and keys in a secure location outside the repository
+   - Use AWS CLI profiles for AWS credentials
+
+2. For production:
+   - Use a secrets management service (AWS Secrets Manager, HashiCorp Vault)
+   - Use environment variables in your deployment platform
+   - Use IAM roles and policies for AWS services
+
+3. For CI/CD:
+   - Use encrypted secrets in your CI/CD platform
+   - Never log or expose sensitive values
+   - Use temporary credentials when possible 

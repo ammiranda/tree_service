@@ -14,6 +14,10 @@ override.tf.json
 terraform.rc
 .terraform.lock.hcl
 
+# Volume directory (LocalStack and other local state)
+volume/
+volume/**/*
+
 # Go
 *.exe
 *.exe~
