@@ -11,6 +11,17 @@ on:
       - main
     paths:
       - 'terraform/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to perform'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
 
 permissions:
   contents: read
@@ -57,7 +68,7 @@ jobs:
 
     - name: Terraform Plan
       id: plan
-      if: github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'plan')
       run: terraform plan -no-color
       continue-on-error: true
 
@@ -90,7 +101,7 @@ jobs:
           })
 
     - name: Check for stale locks
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'))
       run: |
         # Get the lock info
         LOCK_INFO=$(aws dynamodb get-item \
@@ -116,7 +127,7 @@ jobs:
         fi
 
     - name: Terraform Apply
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'))
       id: apply
       run: |
         # Function to run terraform apply with retries
@@ -153,4 +164,43 @@ jobs:
         }
         
         # Run the apply with retries
-        run_apply 
+        run_apply
+
+    - name: Terraform Destroy
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+      run: |
+        # Function to run terraform destroy with retries
+        run_destroy() {
+          local max_attempts=3
+          local attempt=1
+          local success=false
+          
+          while [ $attempt -le $max_attempts ] && [ "$success" = false ]; do
+            echo "Attempt $attempt of $max_attempts to run terraform destroy"
+            
+            # Run destroy with output capture
+            if terraform destroy -auto-approve -no-color 2>&1 | tee destroy.log; then
+              success=true
+              break
+            fi
+            
+            # Check for lock error
+            if grep -q "Error acquiring the state lock" destroy.log; then
+              echo "Lock error detected, waiting before retry..."
+              sleep 30
+            else
+              # If it's not a lock error, exit immediately
+              exit 1
+            fi
+            
+            attempt=$((attempt + 1))
+          done
+          
+          if [ "$success" = false ]; then
+            echo "Failed to acquire lock after $max_attempts attempts"
+            exit 1
+          fi
+        }
+        
+        # Run the destroy with retries
+        run_destroy 
