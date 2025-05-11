@@ -89,26 +89,68 @@ jobs:
             body: output
           })
 
+    - name: Check for stale locks
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        # Get the lock info
+        LOCK_INFO=$(aws dynamodb get-item \
+          --table-name tree-service-terraform-locks \
+          --key '{"LockID": {"S": "tree-service-terraform-state/terraform.tfstate"}}' \
+          --region us-east-2 2>/dev/null || echo "")
+        
+        if [ ! -z "$LOCK_INFO" ]; then
+          # Extract the lock creation time
+          CREATED_TIME=$(echo $LOCK_INFO | jq -r '.Item.Info.M.Created.S // empty')
+          
+          if [ ! -z "$CREATED_TIME" ]; then
+            # Convert to Unix timestamp
+            LOCK_TIME=$(date -jf "%Y-%m-%d %H:%M:%S" "${CREATED_TIME%%.*}" +%s 2>/dev/null || date -d "${CREATED_TIME%%.*}" +%s)
+            CURRENT_TIME=$(date +%s)
+            
+            # If lock is older than 10 minutes, force unlock
+            if [ $((CURRENT_TIME - LOCK_TIME)) -gt 600 ]; then
+              echo "Found stale lock, forcing unlock..."
+              terraform force-unlock -force $(echo $LOCK_INFO | jq -r '.Item.ID.S')
+            fi
+          fi
+        fi
+
     - name: Terraform Apply
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       id: apply
       run: |
-        # Run apply with output capture
-        terraform apply -auto-approve -no-color 2>&1 | tee apply.log
+        # Function to run terraform apply with retries
+        run_apply() {
+          local max_attempts=3
+          local attempt=1
+          local success=false
+          
+          while [ $attempt -le $max_attempts ] && [ "$success" = false ]; do
+            echo "Attempt $attempt of $max_attempts to run terraform apply"
+            
+            # Run apply with output capture
+            if terraform apply -auto-approve -no-color 2>&1 | tee apply.log; then
+              success=true
+              break
+            fi
+            
+            # Check for lock error
+            if grep -q "Error acquiring the state lock" apply.log; then
+              echo "Lock error detected, waiting before retry..."
+              sleep 30
+            else
+              # If it's not a lock error, exit immediately
+              exit 1
+            fi
+            
+            attempt=$((attempt + 1))
+          done
+          
+          if [ "$success" = false ]; then
+            echo "Failed to acquire lock after $max_attempts attempts"
+            exit 1
+          fi
+        }
         
-        # Check the exit status
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then
-          echo "::error::Terraform apply failed"
-          exit 1
-        fi
-        
-        # Check for common hang conditions
-        if grep -q "Error: Error acquiring the state lock" apply.log; then
-          echo "::error::State lock acquisition failed"
-          exit 1
-        fi
-        
-        if grep -q "Error: timeout" apply.log; then
-          echo "::error::Operation timed out"
-          exit 1
-        fi 
+        # Run the apply with retries
+        run_apply 
